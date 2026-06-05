@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ING Listing Engine™ | ING Mining LLC</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="style.css?v=14" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-lockup">
+        <div class="brand-mark">ING</div>
+        <div>
+          <div class="brand-name">ING Listing Engine™</div>
+          <div class="brand-sub">by ING Mining LLC</div>
+        </div>
+      </div>
+      <nav class="nav-list" aria-label="Primary">
+        <button class="nav-item active" type="button" data-page="dashboard"><span class="nav-icon">📊</span>Dashboard</button>
+        <button class="nav-item" type="button" data-page="listings"><span class="nav-icon">🛒</span>Listings</button>
+        <button class="nav-item" type="button" data-page="ai"><span class="nav-icon">✨</span>AI Listing</button>
+        <button class="nav-item" type="button" data-page="activity"><span class="nav-icon">📋</span>Activity</button>
+        <button class="nav-item" type="button" data-page="logs"><span class="nav-icon">🔍</span>Logs</button>
+        <button class="nav-item" type="button" data-page="settings"><span class="nav-icon">⚙️</span>Settings</button>
+        <button class="nav-item nav-license" id="nav-license-btn" type="button" data-page="license"><span class="nav-icon">🔑</span>License<span id="nav-license-dot" class="nav-license-dot dot-off"></span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-brand">ING Listing Engine™</div>
+        <div class="sidebar-footer-copy">&copy; 2025 ING Mining LLC. All rights reserved.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search-wrap">
+          <span class="search-icon">Search</span>
+          <input id="global-search" type="search" placeholder="Search title, SKU, listing ID, category..." />
+        </div>
+        <div class="topbar-actions">
+          <span id="trial-badge" class="badge badge-warn hidden" title="Trial status"></span>
+          <span id="license-badge" class="badge badge-off" title="License status">Unlicensed</span>
+          <span id="auth-status" class="badge badge-off">Not connected to eBay</span>
+          <button id="btn-paste-token" class="btn btn-primary" type="button">Paste eBay Token</button>
+          <button id="btn-connect" class="btn btn-ghost" type="button">OAuth Login</button>
+          <button id="btn-disconnect" class="btn btn-ghost hidden" type="button">Disconnect</button>
+          <button id="btn-settings" class="btn btn-ghost" type="button" title="API credentials">Settings</button>
+        </div>
+      </header>
+
+      <!-- Token paste modal -->
+      <div id="token-overlay" class="modal-overlay hidden">
+        <div class="modal" style="max-width:520px">
+          <div class="modal-header">
+            <h2>Connect eBay Account</h2>
+            <button id="btn-close-token" class="modal-close" type="button">✕</button>
+          </div>
+          <div style="padding:20px 24px 24px;display:grid;gap:16px">
+            <p style="font-size:13px;color:var(--muted)">eBay sandbox OAuth is currently broken. Paste a User Token directly to connect — no OAuth needed.</p>
+            <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;font-size:12px;line-height:1.6">
+              <strong>How to get your token:</strong><br>
+              1. <a href="https://developer.ebay.com/my/auth/?env=sandbox&index=0" target="_blank" style="color:#0064d2">Open eBay Developer Portal → User Tokens</a><br>
+              2. Select your app → click <strong>"Get a User Token"</strong><br>
+              3. Sign in with your sandbox test account<br>
+              4. Copy the token and paste it below
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">eBay User Token</label>
+              <textarea id="token-input" rows="4" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px;font-family:monospace;resize:vertical" placeholder="AgAAAA..."></textarea>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span id="token-msg" style="font-size:12px"></span>
+              <button id="btn-save-token" class="btn btn-primary" type="button">Save Token</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="license-nag" class="license-nag hidden">
+        <div class="license-nag-inner">
+          <strong>ING AutoLister — Unlicensed Copy</strong>
+          <span>Enter your license key in Settings to activate. <a href="https://ingmining.com" target="_blank" rel="noopener noreferrer">Get a key ↗</a></span>
+          <button id="license-nag-settings" class="btn btn-primary small" type="button">Enter Key</button>
+          <button id="license-nag-dismiss" class="btn btn-ghost small" type="button">Dismiss</button>
+        </div>
+      </div>
+
+      <section id="dashboard-section" class="dashboard-section">
+        <div class="hero-panel">
+          <div>
+            <p class="eyebrow">ING Mining LLC — Official Product</p>
+            <h1>ING Listing Engine™</h1>
+            <p class="hero-copy">The official eBay listing automation platform by ING Mining LLC. Manage inventory, auto-fill listings with AI, remove backgrounds, and publish directly to eBay — all in one place.</p>
+          </div>
+          <div class="hero-actions">
+            <button id="btn-import-listings" class="btn btn-primary" type="button">Import Listings</button>
+            <button id="btn-new-ai-listing" class="btn btn-secondary" type="button">Create New AI Listing</button>
+            <button id="btn-refresh-dashboard" class="btn btn-ghost light" type="button">Refresh Listings</button>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-label">Active Listings</span>
+            <strong id="stat-active">0</strong>
+            <span class="stat-note">Imported from eBay</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Inventory Qty</span>
+            <strong id="stat-quantity">0</strong>
+            <span class="stat-note">Available units</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Catalog Value</span>
+            <strong id="stat-value">$0</strong>
+            <span class="stat-note">Price x quantity</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Needs Review</span>
+            <strong id="stat-review">0</strong>
+            <span class="stat-note">Drafts or missing data</span>
+          </article>
+        </div>
+
+        <section class="content-grid">
+          <div id="listings-section" class="panel listings-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow dark">Listings</p>
+                <h2>Existing eBay Listings</h2>
+              </div>
+              <div class="panel-actions">
+                <div class="view-toggle" aria-label="Listing view">
+                  <button id="btn-card-view" class="toggle-btn active" type="button">Cards</button>
+                  <button id="btn-table-view" class="toggle-btn" type="button">Table</button>
+                </div>
+                <button id="btn-refresh-listings" class="btn btn-secondary" type="button">Refresh</button>
+              </div>
+            </div>
+            <div id="listings-feedback" class="listings-feedback">Connect eBay, then import listings.</div>
+            <div id="listings-grid" class="listings-grid"></div>
+            <div class="table-wrap">
+              <table id="listings-table" class="listings-table">
+                <thead>
+                  <tr>
+                    <th>Image</th>
+                    <th>Title</th>
+                    <th>Price</th>
+                    <th>Qty</th>
+                    <th>SKU</th>
+                    <th>Listing ID</th>
+                    <th>Status</th>
+                    <th>Category</th>
+                    <th>Last Updated</th>
+                    <th>Watches</th>
+                    <th>eBay</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="listings-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <aside class="panel activity-panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow dark">Activity</p>
+                <h2>Recent Activity</h2>
+              </div>
+            </div>
+            <div id="activity-list" class="activity-list"></div>
+          </aside>
+        </section>
+      </section>
+
+      <!-- New AI Listing modal — full-screen -->
+      <div id="new-listing-overlay" class="new-listing-overlay hidden">
+        <div class="new-listing-modal">
+
+          <!-- Chrome-style tab bar embedded in header -->
+          <div class="new-listing-header">
+            <div class="nl-header-brand">
+              <span class="nl-header-title">ING Listing Engine™ <span style="font-weight:400;opacity:.6;font-size:11px">by ING Mining LLC</span></span>
+            </div>
+            <div id="nl-tab-bar" class="nl-tab-bar">
+              <button id="nl-tab-new-btn" class="nl-tab-new-btn" type="button" title="New draft">+</button>
+              <button id="nl-load-all-drafts-btn" class="nl-load-all-drafts-btn" type="button" title="Load all saved drafts as tabs">Open All Drafts</button>
+              <button id="nl-clear-drafts-btn" class="nl-clear-drafts-btn" type="button" title="Delete all saved drafts and clear all tabs">Clear All</button>
+            </div>
+            <button id="nl-close" class="nl-close-btn" type="button" title="Close">✕</button>
+          </div>
+
+          <!-- URL browser bar -->
+          <div class="nl-url-section">
+            <div class="nl-url-bar">
+              <div class="nl-url-icon">🔗</div>
+              <input id="nl-url-input" type="url" class="nl-url-input"
+                placeholder="Paste any product URL or eBay link — AI fills the form automatically" />
+              <button id="nl-url-go" class="nl-url-go" type="button">Analyze</button>
+            </div>
+            <div class="nl-url-bar nl-bulk-bar">
+              <div class="nl-url-icon" style="opacity:.7">📦</div>
+              <input id="nl-bulk-url-input" type="url" class="nl-url-input"
+                placeholder="Import multiple products — paste a collection or category page URL" />
+              <button id="nl-bulk-go" class="nl-url-go nl-bulk-go" type="button">Import All</button>
+            </div>
+          </div>
+
+          <div class="new-listing-body">
+
+            <!-- Left: image + AI panel -->
+            <div class="nl-image-panel">
+              <p class="nl-section-heading">Photo &amp; Analysis</p>
+              <p class="nl-panel-label">Product Photo</p>
+
+              <div id="nl-drop-zone" class="nl-drop-zone" tabindex="0">
+                <div class="nl-drop-icon"></div>
+                <p class="nl-drop-title">Drop or paste a photo here</p>
+                <p class="nl-drop-sub">or <span class="link">click to browse</span> &nbsp;·&nbsp; JPG, PNG, WEBP</p>
+                <p class="nl-drop-hint">AI reads the image and fills all fields</p>
+                <input id="nl-file-input" type="file" accept="image/*" hidden />
+              </div>
+
+              <div id="nl-preview-wrap" class="nl-preview-wrap hidden">
+                <img id="nl-preview-img" alt="Product preview" />
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+                  <button id="nl-btn-clear" class="btn btn-ghost small" type="button">Clear image</button>
+                </div>
+              </div>
+
+              <!-- Auto-generated cutout shown here after analysis -->
+              <div id="nl-cutout-wrap" class="nl-cutout-wrap hidden">
+                <p class="nl-panel-label" style="margin-top:10px">Picture 1 (BG Removed)</p>
+                <div class="nl-cutout-img-wrap">
+                  <img id="nl-cutout-img" alt="Background removed" />
+                  <div id="nl-cutout-spinner" class="nl-cutout-spinner hidden">
+                    <div class="nl-ai-spinner"></div>
+                    <span>Removing background…</span>
+                  </div>
+                </div>
+              </div>
+
+              <div id="nl-ai-status" class="nl-ai-status hidden">
+                <div class="nl-ai-spinner"></div>
+                <span id="nl-ai-msg">Analyzing with AI...</span>
+              </div>
+
+              <div id="nl-ai-done" class="nl-ai-done hidden">
+                <span class="nl-ai-check">✓</span>
+                <span>AI analysis complete — review and edit fields</span>
+                <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap">
+                  <button id="nl-btn-reanalyze" class="btn btn-ghost small" type="button">Re-analyze</button>
+                  <button id="nl-btn-improve-seo" class="btn btn-secondary small" type="button">Improve SEO + Description</button>
+                </div>
+              </div>
+
+              <div id="nl-ai-error" class="nl-ai-error hidden">
+                <span id="nl-ai-error-msg"></span>
+                <button id="nl-btn-retry" class="btn btn-ghost small" type="button">Retry</button>
+              </div>
+
+              <!-- 6-slot listing photo grid -->
+              <p class="nl-panel-label" style="margin-top:12px">Listing Photos</p>
+              <div id="nl-photo-grid" class="nl-photo-grid"></div>
+              <div id="nl-photo-upload-status" class="nl-photo-upload-status hidden"></div>
+
+            </div>
+
+            <!-- Right: listing form -->
+            <div class="nl-form-panel">
+              <p class="nl-section-heading">Listing Details</p>
+              <form id="nl-form" autocomplete="off">
+
+                <details class="form-panel" open>
+                  <summary>Title &amp; Category</summary>
+                  <div class="form-grid">
+                    <div class="field full-width">
+                      <label>Title <span class="char-count" id="nl-title-count">0 / 80</span></label>
+                      <input id="nl-title" type="text" maxlength="80" placeholder="Keyword-rich listing title" />
+                    </div>
+                    <div class="field full-width">
+                      <label>Subtitle <span class="char-count" id="nl-subtitle-count">0 / 55</span></label>
+                      <input id="nl-subtitle" type="text" maxlength="55" placeholder="Optional secondary title" />
+                    </div>
+                    <div class="field full-width">
+                      <label>Primary Category</label>
+                      <div class="cat-search-wrap">
+                        <input id="nl-category" type="text" placeholder="Type to search, or click Browse…" autocomplete="off" />
+                        <button type="button" id="nl-cat-browse-btn" class="cat-browse-btn">Browse</button>
+                        <ul id="nl-category-dropdown" class="cat-dropdown" hidden></ul>
+                      </div>
+                      <div class="cat-selected" id="nl-cat-selected" hidden>
+                        <span id="nl-cat-selected-name"></span>
+                        <span class="cat-id-badge" id="nl-cat-id-badge"></span>
+                        <button type="button" class="cat-clear" id="nl-cat-clear" title="Clear">✕</button>
+                      </div>
+                      <input id="nl-category-id" type="hidden" />
+                      <!-- Category tree browser panel -->
+                      <div id="nl-cat-browser" class="cat-browser" hidden>
+                        <div id="nl-cat-browser-trail" class="cat-browser-trail"></div>
+                        <ul id="nl-cat-browser-list" class="cat-browser-list"></ul>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label>Secondary Category ID</label>
+                      <input id="nl-secondary-category-id" type="text" placeholder="Optional" />
+                    </div>
+                  </div>
+                </details>
+
+                <details class="form-panel" open>
+                  <summary>Condition</summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>Condition</label>
+                      <select id="nl-condition">
+                        <option value="NEW">New</option>
+                        <option value="LIKE_NEW">Like New / Open Box</option>
+                        <option value="USED_EXCELLENT" selected>Used - Excellent</option>
+                        <option value="USED_VERY_GOOD">Used - Very Good</option>
+                        <option value="USED_GOOD">Used - Good</option>
+                        <option value="USED_ACCEPTABLE">Used - Acceptable</option>
+                        <option value="FOR_PARTS_OR_NOT_WORKING">For Parts / Not Working</option>
+                      </select>
+                    </div>
+                    <div class="field full-width">
+                      <label>Condition Description</label>
+                      <input id="nl-condition-desc" type="text" placeholder="Tested, cleaned, cosmetic wear, missing parts…" />
+                    </div>
+                  </div>
+                </details>
+
+                <details class="form-panel" open>
+                  <summary>Description</summary>
+                  <div class="field">
+                    <div class="desc-tab-bar">
+                      <button class="desc-tab active" data-desc-tab="edit" type="button">Edit HTML</button>
+                      <button class="desc-tab" data-desc-tab="text" type="button">Edit Text</button>
+                      <button class="desc-tab" data-desc-tab="preview" type="button">Preview</button>
+                      <span class="desc-tab-hint">eBay-safe HTML &nbsp;<span class="char-count" id="nl-desc-count">0 / 4000</span></span>
+                    </div>
+                    <div id="nl-desc-edit-wrap">
+                      <textarea id="nl-description" rows="10" placeholder="Full listing description. HTML is supported and rendered live in Preview."></textarea>
+                    </div>
+                    <div id="nl-desc-text-wrap" class="hidden">
+                      <textarea id="nl-desc-text" rows="10" placeholder="Edit as plain text. Paragraphs (blank lines) are preserved when switching back to HTML."></textarea>
+                    </div>
+                    <div id="nl-desc-preview-wrap" class="hidden">
+                      <div id="nl-desc-preview" class="nl-desc-preview"></div>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="form-panel" open>
+                  <summary>Pricing &amp; Quantity</summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>Buy It Now Price (USD)</label>
+                      <input id="nl-price" type="number" step="0.01" min="0" placeholder="0.00" />
+                    </div>
+                    <div class="field">
+                      <label>Quantity Available</label>
+                      <input id="nl-quantity" type="number" min="1" value="1" />
+                    </div>
+                    <div class="field">
+                      <label>Qty Limit Per Buyer</label>
+                      <input id="nl-qty-limit" type="number" min="1" placeholder="No limit" />
+                    </div>
+                    <div class="field full-width">
+                      <label class="toggle-label">
+                        <input id="nl-best-offer" type="checkbox" />
+                        <span>Enable Best Offer</span>
+                      </label>
+                    </div>
+                    <div class="field" id="nl-best-offer-fields" style="display:none">
+                      <label>Auto-Accept Price (USD)</label>
+                      <input id="nl-auto-accept" type="number" step="0.01" min="0" />
+                    </div>
+                    <div class="field" id="nl-best-offer-decline" style="display:none">
+                      <label>Auto-Decline Price (USD)</label>
+                      <input id="nl-auto-decline" type="number" step="0.01" min="0" />
+                    </div>
+                  </div>
+                </details>
+
+                <details class="form-panel">
+                  <summary>Product Identifiers</summary>
+                  <div class="form-grid">
+                    <div class="field"><label>Brand</label><input id="nl-brand" type="text" placeholder="Bitmain" /></div>
+                    <div class="field"><label>MPN</label><input id="nl-mpn" type="text" placeholder="Manufacturer part number" /></div>
+                    <div class="field"><label>UPC</label><input id="nl-upc" type="text" /></div>
+                    <div class="field"><label>EAN</label><input id="nl-ean" type="text" /></div>
+                    <div class="field"><label>ISBN</label><input id="nl-isbn" type="text" /></div>
+                  </div>
+                </details>
+
+                <details class="form-panel">
+                  <summary>Item Specifics</summary>
+                  <div id="nl-specifics-list"></div>
+                  <button type="button" id="nl-btn-add-specific" class="btn btn-ghost small">Add Row</button>
+                </details>
+
+                <details class="form-panel">
+                  <summary>Shipping &amp; Package</summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>Package Type</label>
+                      <select id="nl-package-type">
+                        <option value="LETTER">Letter</option>
+                        <option value="LARGE_ENVELOPE_OR_FLAT_PACK">Large Envelope / Flat Pack</option>
+                        <option value="PACKAGE_THICK_ENVELOPE" selected>Package / Thick Envelope</option>
+                        <option value="MAILING_BOX">Mailing Box</option>
+                        <option value="BULKY_GOODS">Bulky Goods</option>
+                        <option value="VERY_LARGE_PACKAGE">Very Large Package</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Handling Time</label>
+                      <select id="nl-handling-time">
+                        <option value="1" selected>1 business day</option>
+                        <option value="2">2 business days</option>
+                        <option value="3">3 business days</option>
+                        <option value="5">5 business days</option>
+                      </select>
+                    </div>
+                    <div class="field"><label>Weight — Pounds</label><input id="nl-weight-lbs" type="number" min="0" value="0" /></div>
+                    <div class="field"><label>Weight — Ounces</label><input id="nl-weight-oz" type="number" min="0" max="15" value="0" /></div>
+                    <div class="field"><label>Length (inches)</label><input id="nl-length" type="number" min="0" step="0.1" /></div>
+                    <div class="field"><label>Width (inches)</label><input id="nl-width" type="number" min="0" step="0.1" /></div>
+                    <div class="field"><label>Height (inches)</label><input id="nl-height" type="number" min="0" step="0.1" /></div>
+                    <div class="field"><label>Item Location ZIP</label><input id="nl-location-zip" type="text" maxlength="10" /></div>
+                    <div class="field">
+                      <label>Country</label>
+                      <select id="nl-location-country">
+                        <option value="US" selected>United States</option>
+                        <option value="CN">China</option>
+                        <option value="HK">Hong Kong</option>
+                        <option value="CA">Canada</option>
+                        <option value="GB">United Kingdom</option>
+                        <option value="AU">Australia</option>
+                        <option value="DE">Germany</option>
+                        <option value="JP">Japan</option>
+                        <option value="KR">South Korea</option>
+                        <option value="TW">Taiwan</option>
+                        <option value="SG">Singapore</option>
+                        <option value="FR">France</option>
+                        <option value="IT">Italy</option>
+                        <option value="ES">Spain</option>
+                        <option value="NL">Netherlands</option>
+                        <option value="MX">Mexico</option>
+                        <option value="IN">India</option>
+                        <option value="BR">Brazil</option>
+                      </select>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="form-panel" open>
+                  <summary>Seller Policies</summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>Shipping / Fulfillment</label>
+                      <select id="nl-fulfillment-sel"><option value="">— Select policy —</option></select>
+                    </div>
+                    <div class="field">
+                      <label>Payment</label>
+                      <select id="nl-payment-sel"><option value="">— Select policy —</option></select>
+                    </div>
+                    <div class="field">
+                      <label>Return</label>
+                      <select id="nl-return-sel"><option value="">— Select policy —</option></select>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                    <button type="button" id="nl-btn-load-policies" class="btn btn-ghost small">Reload Policies</button>
+                    <span id="nl-policy-msg" class="sd-test-msg"></span>
+                  </div>
+                </details>
+
+                <details class="form-panel">
+                  <summary>Listing Options</summary>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label>Listing Format</label>
+                      <select id="nl-format">
+                        <option value="FIXED_PRICE" selected>Fixed Price</option>
+                        <option value="AUCTION">Auction</option>
+                      </select>
+                    </div>
+                    <div class="field" id="nl-duration-wrap" style="display:none">
+                      <label>Auction Duration</label>
+                      <select id="nl-duration">
+                        <option value="1">1 day</option>
+                        <option value="3">3 days</option>
+                        <option value="5">5 days</option>
+                        <option value="7" selected>7 days</option>
+                        <option value="10">10 days</option>
+                      </select>
+                    </div>
+                    <div class="field full-width">
+                      <label class="toggle-label">
+                        <input id="nl-private" type="checkbox" />
+                        <span>Private listing</span>
+                      </label>
+                    </div>
+                    <div class="field"><label>Charity Donation %</label><input id="nl-charity-pct" type="number" min="0" max="100" value="0" /></div>
+                    <div class="field"><label>Charity ID</label><input id="nl-charity-id" type="text" /></div>
+                  </div>
+                </details>
+
+              </form>
+            </div>
+
+          </div><!-- /.new-listing-body -->
+
+          <div class="new-listing-footer">
+            <div id="nl-result-msg" class="nl-result-msg"></div>
+            <div class="nl-footer-actions">
+              <span class="powered-by">Powered by ING Mining™</span>
+              <button id="nl-btn-cancel" class="btn btn-ghost" type="button">Cancel</button>
+              <button id="nl-btn-save-local" class="btn btn-secondary btn-large" type="button">Save Draft</button>
+              <button id="nl-btn-publish" class="btn btn-primary btn-large" type="button">Publish to eBay</button>
+            </div>
+          </div>
+
+        </div><!-- /.new-listing-modal -->
+      </div><!-- /#new-listing-overlay -->
+
+      <!-- ── License Page ─────────────────────────────────────────── -->
+      <section id="license-section" class="panel license-page hidden">
+
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow dark">License</p>
+            <h2>ING Listing Engine™ License</h2>
+          </div>
+        </div>
+
+        <!-- Status banner -->
+        <div id="lp-status-banner" class="lp-status-banner lp-unlicensed">
+          <div id="lp-status-icon" class="lp-status-icon">🔑</div>
+          <div>
+            <div id="lp-tier-label" class="lp-tier-label">Unlicensed</div>
+            <div id="lp-status-msg" class="lp-status-msg">Enter a license key below to activate</div>
+          </div>
+        </div>
+
+        <!-- Activate card -->
+        <div class="lp-card">
+          <h3 class="lp-card-title">Activate License</h3>
+          <div class="lp-activate-row">
+            <input id="lp-key-input" type="text" class="lp-key-input" placeholder="ING-BETA-2025 · ING-FREE-XXXX · ING-PRO-XXXX" autocomplete="off" />
+            <button id="lp-activate-btn" class="btn btn-primary" type="button">Activate</button>
+          </div>
+          <div id="lp-activate-msg" class="sd-test-msg" style="margin-top:8px"></div>
+          <p class="lp-hint">Your key is saved locally on this machine. <a href="https://ingmining.com" target="_blank" rel="noopener noreferrer" class="link-ext">Get a key at ingmining.com ↗</a></p>
+        </div>
+
+        <!-- Tier comparison -->
+        <div class="lp-tiers">
+
+          <div class="lp-tier-card" id="lp-tier-free">
+            <div class="lp-tier-header">
+              <span class="lp-tier-name">Free</span>
+              <span class="lp-tier-price">$0</span>
+            </div>
+            <ul class="lp-feature-list">
+              <li>AI-powered listing analysis</li>
+              <li>Publish to eBay</li>
+              <li>Draft save &amp; management</li>
+              <li>Background removal</li>
+              <li>Category browser</li>
+              <li>Up to 50 listings / month</li>
+            </ul>
+            <div class="lp-tier-key-hint">Use key <code>ING-BETA-2025</code> for free beta access</div>
+          </div>
+
+          <div class="lp-tier-card lp-tier-pro" id="lp-tier-pro">
+            <div class="lp-tier-badge">Pro</div>
+            <div class="lp-tier-header">
+              <span class="lp-tier-name">Pro</span>
+              <span class="lp-tier-price">$49.99<span style="font-size:13px;font-weight:500;color:var(--muted)">/mo</span></span>
+            </div>
+            <ul class="lp-feature-list">
+              <li>Everything in Free</li>
+              <li>Unlimited listings</li>
+              <li>Bulk import from URL</li>
+              <li>AI image generation</li>
+              <li>Priority support</li>
+              <li>Early access to new features</li>
+            </ul>
+            <button id="lp-buy-pro-btn" class="btn btn-primary" type="button" style="margin-top:auto">Subscribe — $49.99/mo</button>
+            <div id="lp-buy-msg" class="sd-test-msg" style="margin-top:6px;font-size:12px"></div>
+          </div>
+
+        </div>
+
+        <!-- Beta note -->
+        <div class="lp-beta-note">
+          <strong>Beta Tester Access</strong> — Use the key <code>ING-BETA-2025</code> for full free-tier access during the beta period. Share it with anyone testing the app.
+        </div>
+
+      </section>
+
+      <section id="settings-section" class="panel settings-panel hidden">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow dark">Settings</p>
+            <h2>Local System Status</h2>
+          </div>
+          <button id="btn-open-credentials" class="btn btn-secondary" type="button">API Credentials</button>
+        </div>
+        <div id="settings-status" class="settings-list"></div>
+
+        <!-- Image Generation settings — visible directly on the Settings page -->
+        <div class="setup-section imggen-settings-card">
+          <h3>Image Generation</h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Generate AI product photos automatically when creating a new listing. Uses your local Stable Diffusion server or OpenAI DALL-E.</p>
+          <div class="form-grid">
+            <div class="field">
+              <label>Mode</label>
+              <select id="pg-imggen-mode">
+                <option value="disabled">Disabled (no AI photos)</option>
+                <option value="a1111">Local AUTOMATIC1111 (port 7860)</option>
+                <option value="comfyui">Local ComfyUI (port 8188)</option>
+                <option value="dalle">OpenAI DALL-E 3</option>
+              </select>
+            </div>
+            <div id="pg-imggen-endpoint-wrap" class="field" style="display:none">
+              <label>Local Server Endpoint</label>
+              <input id="pg-imggen-endpoint" type="text" placeholder="http://127.0.0.1:7860" autocomplete="off" />
+            </div>
+            <div id="pg-imggen-model-wrap" class="field" style="display:none">
+              <label>ComfyUI Checkpoint</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <select id="pg-imggen-model" style="flex:1">
+                  <option value="">— click Load to fetch models —</option>
+                </select>
+                <button id="pg-imggen-load-models" class="btn btn-ghost small" type="button">Load Models</button>
+              </div>
+            </div>
+          </div>
+          <div class="imggen-test-row" style="margin-top:14px">
+            <button id="pg-imggen-save" class="btn btn-primary" type="button">Save Settings</button>
+            <button id="pg-imggen-test" class="btn btn-secondary" type="button">Test Connection</button>
+            <span id="pg-imggen-msg" class="sd-test-msg"></span>
+          </div>
+          <p style="font-size:12px;color:var(--muted);margin-top:12px">
+            Need a local AI image server?
+            <a href="https://lykos.ai/" target="_blank" rel="noopener noreferrer" class="link-ext">Download Stability Matrix (easiest setup) ↗</a>
+            &nbsp;&nbsp;
+            <button id="pg-imggen-guide" class="btn btn-ghost small" type="button">Full Setup Guide</button>
+          </p>
+        <!-- Listing Defaults — pre-filled into every new listing -->
+        <div class="setup-section imggen-settings-card">
+          <h3>Listing Defaults</h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:14px">These values are pre-filled into every new listing. You can still change them per-listing in the modal.</p>
+          <div class="form-grid">
+            <div class="field">
+              <label>Item Location ZIP</label>
+              <input id="pg-default-zip" type="text" maxlength="10" placeholder="e.g. 90210" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label>Country</label>
+              <select id="pg-default-country">
+                <option value="US">United States</option>
+                <option value="CN">China</option>
+                <option value="HK">Hong Kong</option>
+                <option value="CA">Canada</option>
+                <option value="GB">United Kingdom</option>
+                <option value="AU">Australia</option>
+                <option value="DE">Germany</option>
+                <option value="JP">Japan</option>
+                <option value="KR">South Korea</option>
+                <option value="TW">Taiwan</option>
+                <option value="SG">Singapore</option>
+                <option value="FR">France</option>
+                <option value="IT">Italy</option>
+                <option value="ES">Spain</option>
+                <option value="NL">Netherlands</option>
+                <option value="MX">Mexico</option>
+                <option value="IN">India</option>
+                <option value="BR">Brazil</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Package Type</label>
+              <select id="pg-default-package-type">
+                <option value="LETTER">Letter</option>
+                <option value="LARGE_ENVELOPE_OR_FLAT_PACK">Large Envelope / Flat Pack</option>
+                <option value="PACKAGE_THICK_ENVELOPE">Package / Thick Envelope</option>
+                <option value="MAILING_BOX">Mailing Box</option>
+                <option value="BULKY_GOODS">Bulky Goods</option>
+                <option value="VERY_LARGE_PACKAGE">Very Large Package</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Handling Time</label>
+              <select id="pg-default-handling">
+                <option value="1">1 business day</option>
+                <option value="2">2 business days</option>
+                <option value="3">3 business days</option>
+                <option value="5">5 business days</option>
+              </select>
+            </div>
+            <div class="field"><label>Weight — Pounds</label><input id="pg-default-weight-lbs" type="number" min="0" value="0" /></div>
+            <div class="field"><label>Weight — Ounces</label><input id="pg-default-weight-oz" type="number" min="0" max="15" value="0" /></div>
+            <div class="field"><label>Length (inches)</label><input id="pg-default-length" type="number" min="0" step="0.1" value="0" /></div>
+            <div class="field"><label>Width (inches)</label><input id="pg-default-width" type="number" min="0" step="0.1" value="0" /></div>
+            <div class="field"><label>Height (inches)</label><input id="pg-default-height" type="number" min="0" step="0.1" value="0" /></div>
+            <div class="field full-width">
+              <label>Default Shipping / Fulfillment Policy ID</label>
+              <input id="pg-default-fulfillment" type="text" placeholder="Policy ID — loaded from your eBay policies" autocomplete="off" />
+              <small id="pg-default-fulfillment-name" style="color:var(--muted);font-size:11px;margin-top:3px;display:block"></small>
+            </div>
+            <div class="field full-width">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input id="pg-default-best-offer" type="checkbox" />
+                Enable Best Offer by default on every listing
+              </label>
+            </div>
+          </div>
+          <div class="imggen-test-row" style="margin-top:14px">
+            <button id="pg-defaults-save" class="btn btn-primary" type="button">Save Defaults</button>
+            <span id="pg-defaults-msg" class="sd-test-msg"></span>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <section id="logs-section" class="panel logs-panel hidden">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow dark">Logs</p>
+            <h2>Recent API Actions</h2>
+          </div>
+          <button id="btn-refresh-logs" class="btn btn-secondary" type="button">Refresh</button>
+        </div>
+        <div id="logs-list" class="logs-list"></div>
+      </section>
+
+      <section id="form-section" class="panel form-section hidden">
+        <div class="form-header">
+          <div>
+            <p class="eyebrow dark">Listing Editor</p>
+            <h2>Edit Listing</h2>
+          </div>
+          <button type="button" id="btn-new-from-edit" class="btn btn-secondary">New AI Listing</button>
+        </div>
+
+        <form id="listing-form">
+          <details class="form-panel" open>
+            <summary>Title and Category</summary>
+            <div class="form-grid">
+              <div class="field full-width">
+                <label>Title <span class="char-count" id="title-count">0 / 80</span></label>
+                <input id="f-title" type="text" maxlength="80" placeholder="Keyword-rich listing title" />
+              </div>
+              <div class="field full-width">
+                <label>Subtitle <span class="char-count" id="subtitle-count">0 / 55</span></label>
+                <input id="f-subtitle" type="text" maxlength="55" placeholder="Optional secondary title" />
+              </div>
+              <div class="field">
+                <label>Primary Category Name</label>
+                <input id="f-category" type="text" placeholder="e.g. Electronics, Clothing, Tools, Collectibles" />
+              </div>
+              <div class="field">
+                <label>Primary Category ID</label>
+                <input id="f-category-id" type="text" placeholder="Category ID" />
+              </div>
+              <div class="field">
+                <label>Secondary Category ID</label>
+                <input id="f-secondary-category-id" type="text" placeholder="Optional" />
+              </div>
+            </div>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Condition</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label>Condition</label>
+                <select id="f-condition">
+                  <option value="NEW">New</option>
+                  <option value="LIKE_NEW">Like New / Open Box</option>
+                  <option value="USED_EXCELLENT">Used - Excellent</option>
+                  <option value="USED_VERY_GOOD">Used - Very Good</option>
+                  <option value="USED_GOOD">Used - Good</option>
+                  <option value="USED_ACCEPTABLE">Used - Acceptable</option>
+                  <option value="FOR_PARTS_OR_NOT_WORKING">For Parts / Not Working</option>
+                </select>
+              </div>
+              <div class="field full-width">
+                <label>Condition Description</label>
+                <input id="f-condition-desc" type="text" placeholder="Tested, cleaned, cosmetic wear, missing parts, etc." />
+              </div>
+            </div>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Product Identifiers</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label>Brand</label>
+                <input id="f-brand" type="text" placeholder="Bitmain" />
+              </div>
+              <div class="field">
+                <label>MPN</label>
+                <input id="f-mpn" type="text" placeholder="Manufacturer part number" />
+              </div>
+              <div class="field">
+                <label>UPC</label>
+                <input id="f-upc" type="text" placeholder="UPC" />
+              </div>
+              <div class="field">
+                <label>EAN</label>
+                <input id="f-ean" type="text" placeholder="EAN" />
+              </div>
+              <div class="field">
+                <label>ISBN</label>
+                <input id="f-isbn" type="text" placeholder="ISBN" />
+              </div>
+            </div>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Item Specifics</summary>
+            <div id="specifics-list"></div>
+            <button type="button" id="btn-add-specific" class="btn btn-ghost small">Add Row</button>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Photos</summary>
+            <div id="photo-url-list" class="photo-url-list"></div>
+            <button type="button" id="btn-add-photo-url" class="btn btn-ghost small">Add Photo URL</button>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Description</summary>
+            <div class="field">
+              <label>Listing Description</label>
+              <textarea id="f-description" rows="10" placeholder="Full listing description. HTML is supported."></textarea>
+            </div>
+          </details>
+
+          <details class="form-panel" open>
+            <summary>Pricing and Quantity</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label>Buy It Now Price (USD)</label>
+                <input id="f-price" type="number" step="0.01" min="0" placeholder="0.00" />
+              </div>
+              <div class="field">
+                <label>Quantity Available</label>
+                <input id="f-quantity" type="number" min="1" value="1" />
+              </div>
+              <div class="field">
+                <label>Qty Limit Per Buyer</label>
+                <input id="f-qty-limit" type="number" min="1" placeholder="No limit" />
+              </div>
+              <div class="field full-width">
+                <label class="toggle-label">
+                  <input id="f-best-offer" type="checkbox" />
+                  <span>Enable Best Offer</span>
+                </label>
+              </div>
+              <div class="field" id="best-offer-fields" style="display:none">
+                <label>Auto-Accept Price (USD)</label>
+                <input id="f-auto-accept" type="number" step="0.01" min="0" />
+              </div>
+              <div class="field" id="best-offer-decline" style="display:none">
+                <label>Auto-Decline Price (USD)</label>
+                <input id="f-auto-decline" type="number" step="0.01" min="0" />
+              </div>
+            </div>
+          </details>
+
+          <details class="form-panel">
+            <summary>Shipping and Package</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label>Package Type</label>
+                <select id="f-package-type">
+                  <option value="LETTER">Letter</option>
+                  <option value="LARGE_ENVELOPE_OR_FLAT_PACK">Large Envelope / Flat Pack</option>
+                  <option value="PACKAGE_THICK_ENVELOPE" selected>Package / Thick Envelope</option>
+                  <option value="MAILING_BOX">Mailing Box</option>
+                  <option value="BULKY_GOODS">Bulky Goods</option>
+                  <option value="VERY_LARGE_PACKAGE">Very Large Package</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Handling Time</label>
+                <select id="f-handling-time">
+                  <option value="1" selected>1 business day</option>
+                  <option value="2">2 business days</option>
+                  <option value="3">3 business days</option>
+                  <option value="5">5 business days</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Weight - Pounds</label>
+                <input id="f-weight-lbs" type="number" min="0" value="0" />
+              </div>
+              <div class="field">
+                <label>Weight - Ounces</label>
+                <input id="f-weight-oz" type="number" min="0" max="15" value="0" />
+              </div>
+              <div class="field">
+                <label>Length (inches)</label>
+                <input id="f-length" type="number" min="0" step="0.1" />
+              </div>
+              <div class="field">
+                <label>Width (inches)</label>
+                <input id="f-width" type="number" min="0" step="0.1" />
+              </div>
+              <div class="field">
+                <label>Height (inches)</label>
+                <input id="f-height" type="number" min="0" step="0.1" />
+              </div>
+              <div class="field">
+                <label>Item Location ZIP Code</label>
+                <input id="f-location-zip" type="text" maxlength="10" />
+              </div>
+              <div class="field">
+                <label>Item Location Country</label>
+                <select id="f-location-country">
+                  <option value="US" selected>United States</option>
+                  <option value="CN">China</option>
+                  <option value="HK">Hong Kong</option>
+                  <option value="CA">Canada</option>
+                  <option value="GB">United Kingdom</option>
+                  <option value="AU">Australia</option>
+                  <option value="DE">Germany</option>
+                  <option value="JP">Japan</option>
+                  <option value="KR">South Korea</option>
+                  <option value="TW">Taiwan</option>
+                  <option value="SG">Singapore</option>
+                  <option value="FR">France</option>
+                  <option value="IT">Italy</option>
+                  <option value="ES">Spain</option>
+                  <option value="NL">Netherlands</option>
+                  <option value="MX">Mexico</option>
+                  <option value="IN">India</option>
+                  <option value="BR">Brazil</option>
+                </select>
+              </div>
+            </div>
+          </details>
+
+          <details class="form-panel">
+            <summary>Listing Options</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label>Listing Format</label>
+                <select id="f-format">
+                  <option value="FIXED_PRICE" selected>Fixed Price</option>
+                  <option value="AUCTION">Auction</option>
+                </select>
+              </div>
+              <div class="field" id="duration-wrap">
+                <label>Auction Duration</label>
+                <select id="f-duration">
+                  <option value="1">1 day</option>
+                  <option value="3">3 days</option>
+                  <option value="5">5 days</option>
+                  <option value="7" selected>7 days</option>
+                  <option value="10">10 days</option>
+                </select>
+              </div>
+              <div class="field full-width">
+                <label class="toggle-label">
+                  <input id="f-private" type="checkbox" />
+                  <span>Private listing</span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Charity Donation %</label>
+                <input id="f-charity-pct" type="number" min="0" max="100" value="0" />
+              </div>
+              <div class="field">
+                <label>Charity ID</label>
+                <input id="f-charity-id" type="text" />
+              </div>
+            </div>
+          </details>
+
+          <div class="form-actions">
+            <button type="submit" id="btn-post" class="btn btn-primary btn-large">Preview Draft</button>
+            <button type="button" id="btn-create-ebay-draft" class="btn btn-secondary btn-large hidden">Create eBay Draft</button>
+            <button type="button" id="btn-update" class="btn btn-primary btn-large hidden">Save Changes</button>
+            <button type="button" id="btn-revise-ebay" class="btn btn-danger btn-large hidden">Revise eBay</button>
+            <button type="button" id="btn-new-listing" class="btn btn-ghost hidden">New Listing</button>
+          </div>
+
+          <div id="draft-preview-panel" class="draft-preview hidden" aria-live="polite"></div>
+        </form>
+      </section>
+
+      <div id="result" class="hidden"></div>
+
+      <footer class="app-footer">
+        <span>Powered by <strong>ING Mining™</strong></span>
+        <span class="app-footer-divider">·</span>
+        <span>ING Listing Engine™</span>
+        <span class="app-footer-divider">·</span>
+        <span>&copy; 2025 ING Mining LLC. All rights reserved.</span>
+      </footer>
+    </main>
+  </div>
+
+  <div id="setup-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>API Credentials</h2>
+        <button id="btn-close-setup" class="modal-close" type="button" title="Close">X</button>
+      </div>
+      <p class="modal-desc">Credentials are saved locally on this machine and used only for the configured APIs.</p>
+
+      <div class="setup-section">
+        <h3>License</h3>
+        <div class="field">
+          <label>License Key</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="s-license-key" type="text" placeholder="ING-FREE-XXXX or ING-PRO-XXXX" autocomplete="off" style="flex:1" />
+            <button id="btn-activate-license" class="btn btn-secondary" type="button">Activate</button>
+          </div>
+        </div>
+        <div id="license-activate-msg" class="sd-test-msg" style="margin-top:6px"></div>
+      </div>
+
+      <div class="setup-section">
+        <h3>AI Provider</h3>
+        <div class="field">
+          <label>Anthropic API Key <span class="hint-inline">— listing analysis</span> <a href="https://console.anthropic.com/settings/keys" target="_blank" class="link-ext">Get key</a></label>
+          <input id="s-anthropic-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>OpenAI API Key <span class="hint-inline">— AI product photo generation (DALL-E 3)</span> <a href="https://platform.openai.com/api-keys" target="_blank" class="link-ext">Get key</a></label>
+          <input id="s-openai-key" type="password" placeholder="sk-..." autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <h3>eBay Developer</h3>
+        <div class="setup-env">
+          <label class="toggle-label">
+            <input id="s-sandbox" type="checkbox" checked />
+            <span>Use Sandbox</span>
+          </label>
+        </div>
+        <div class="field">
+          <label>App ID (Client ID)</label>
+          <input id="s-client-id" type="text" placeholder="YourApp-PRD-xxxxxxxxxxxxxxxx" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>Dev ID</label>
+          <input id="s-dev-id" type="text" placeholder="bb959ee9-..." autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>Cert ID (Client Secret)</label>
+          <input id="s-client-secret" type="password" placeholder="PRD-..." autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>RuName <span class="hint-inline">Sandbox only; Production uses the RuName you configured</span></label>
+          <input id="s-runame" type="text" placeholder="YourName-AppName-PRD-xxxxxxxx" autocomplete="off" />
+        </div>
+        <p class="modal-note">Production OAuth uses the RuName saved above. Configure that RuName's accepted URL in your eBay developer portal, then complete the OAuth flow and paste the full redirect URL below.</p>
+        <div class="field">
+          <label>Paste eBay OAuth Redirect URL</label>
+          <textarea id="s-oauth-redirect-url" rows="3" placeholder="https://your-oauth-redirect-url?code=...&state=..." autocomplete="off"></textarea>
+        </div>
+        <div class="modal-actions compact-actions">
+          <div id="oauth-redirect-msg"></div>
+          <button id="btn-exchange-oauth-redirect" class="btn btn-secondary" type="button">Exchange Production OAuth URL</button>
+        </div>
+        <div class="field">
+          <label>User Token <span class="hint-inline">optional</span></label>
+          <input id="s-user-token" type="password" placeholder="AgAAAA..." autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <h3>Image Generation</h3>
+        <button id="btn-open-imggen-setup" class="btn btn-secondary" type="button" style="margin-bottom:14px">Open Setup Guide</button>
+        <div class="field">
+          <label>Mode</label>
+          <select id="s-image-gen-mode">
+            <option value="disabled">Disabled (no AI photos)</option>
+            <option value="local_sd">Local Stable Diffusion</option>
+            <option value="dalle">OpenAI DALL-E 3</option>
+          </select>
+        </div>
+
+        <div id="s-local-sd-fields" style="display:none">
+          <div class="field" style="margin-top:12px">
+            <label>Backend</label>
+            <select id="s-local-sd-backend">
+              <option value="automatic1111">AUTOMATIC1111 (WebUI)</option>
+              <option value="comfyui">ComfyUI</option>
+            </select>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>Local Server Endpoint</label>
+            <input id="s-local-sd-endpoint" type="text" placeholder="http://127.0.0.1:7860" autocomplete="off" />
+          </div>
+          <div id="s-comfyui-model-field" class="field" style="display:none;margin-top:12px">
+            <label>ComfyUI Checkpoint</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="s-local-sd-model" style="flex:1">
+                <option value="">— click Load to fetch models —</option>
+              </select>
+              <button id="s-btn-load-models" class="btn btn-ghost small" type="button">Load Models</button>
+            </div>
+          </div>
+          <div class="modal-actions compact-actions" style="margin-top:12px">
+            <div id="sd-test-msg" class="sd-test-msg"></div>
+            <button id="btn-test-sd" class="btn btn-secondary" type="button">Test Local Image Server</button>
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+          <label>Image Prompt Template <span class="hint-inline">use {ITEM} for the product name</span></label>
+          <textarea id="s-image-prompt" rows="3" placeholder="Professional ecommerce product photo of {ITEM}, white seamless background, studio lighting, realistic detail, marketplace listing photography, no text, no watermarks" autocomplete="off"></textarea>
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <h3>eBay Business Policies</h3>
+
+        <div class="policy-load-row">
+          <button id="btn-load-policies" class="btn btn-secondary" type="button">Load Policies from eBay</button>
+          <span id="policy-load-msg" class="sd-test-msg"></span>
+          <a href="https://www.ebay.com/sh/m/businesspolicy" target="_blank" rel="noopener noreferrer" class="policy-hub-link">Manage in Seller Hub ↗</a>
+        </div>
+
+        <div id="policy-selects" class="setup-grid hidden">
+          <div class="field">
+            <label>Shipping / Fulfillment Policy</label>
+            <select id="s-fulfillment-sel"><option value="">— Select policy —</option></select>
+          </div>
+          <div class="field">
+            <label>Payment Policy</label>
+            <select id="s-payment-sel"><option value="">— Select policy —</option></select>
+          </div>
+          <div class="field">
+            <label>Return Policy</label>
+            <select id="s-return-sel"><option value="">— Select policy —</option></select>
+          </div>
+        </div>
+
+        <div class="setup-grid" style="margin-top:10px">
+          <div class="field">
+            <label>Fulfillment Policy ID <span class="hint-inline">auto-filled above or paste manually</span></label>
+            <input id="s-fulfillment" type="text" placeholder="e.g. 12345678" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Payment Policy ID <span class="hint-inline">auto-filled above or paste manually</span></label>
+            <input id="s-payment" type="text" placeholder="e.g. 12345678" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Return Policy ID <span class="hint-inline">auto-filled above or paste manually</span></label>
+            <input id="s-return" type="text" placeholder="e.g. 12345678" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <div id="setup-status-msg"></div>
+        <button id="btn-save-setup" class="btn btn-primary" type="button">Save and Connect eBay</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Image Generator Setup Modal ─────────────────────────────── -->
+  <div id="imggen-setup-overlay" class="modal-overlay hidden" tabindex="-1">
+    <div class="modal imggen-setup-modal">
+      <div class="modal-header">
+        <h2>Local Image Generator Setup</h2>
+        <button id="imggen-close" class="modal-close" type="button" title="Close">X</button>
+      </div>
+
+      <!-- Detection banner -->
+      <div id="imggen-detect-banner" class="imggen-detect-banner detecting">
+        <span id="imggen-detect-text">Checking for running image servers...</span>
+      </div>
+
+      <!-- Option tabs -->
+      <div class="imggen-tabs">
+        <button class="imggen-tab active" data-imggen-tab="stability">Stability Matrix <span class="imggen-recommended-tag">Recommended</span></button>
+        <button class="imggen-tab" data-imggen-tab="a1111">AUTOMATIC1111</button>
+        <button class="imggen-tab" data-imggen-tab="comfyui">ComfyUI</button>
+      </div>
+
+      <!-- Stability Matrix panel -->
+      <div id="imggen-panel-stability" class="imggen-panel">
+        <p class="imggen-desc">Stability Matrix is a one-click manager for local AI image generation on Windows. It installs Python, CUDA drivers, and models automatically — no command line knowledge required.</p>
+        <ol class="imggen-steps">
+          <li>Click <strong>Download Stability Matrix</strong> below — this opens <code>lykos.ai</code> (official site)</li>
+          <li>Download and run <code>StabilityMatrix-win-x64.exe</code></li>
+          <li>In Stability Matrix, click <strong>Add Package</strong> and choose <strong>ComfyUI</strong> or <strong>AUTOMATIC1111 Web UI</strong></li>
+          <li>Let it install — allow 15–30 minutes and about 20 GB of free disk space for models</li>
+          <li>In the <strong>Models</strong> tab, download an SDXL model (e.g. <em>Stable Diffusion XL Base 1.0</em>)</li>
+          <li>Click <strong>Launch</strong> in Stability Matrix to start your image server</li>
+          <li>Click <strong>Test Connection</strong> below — this app will detect your server automatically</li>
+        </ol>
+        <a href="https://lykos.ai/" target="_blank" rel="noopener noreferrer" class="btn btn-primary imggen-download-btn">Download Stability Matrix (lykos.ai)</a>
+      </div>
+
+      <!-- AUTOMATIC1111 panel -->
+      <div id="imggen-panel-a1111" class="imggen-panel hidden">
+        <p class="imggen-desc">Install AUTOMATIC1111 Stable Diffusion Web UI manually. Requires Python 3.10 and Git. Recommended for users comfortable with the command line.</p>
+        <ol class="imggen-steps">
+          <li>Install <strong>Python 3.10</strong> from <code>python.org</code> — tick "Add Python to PATH" during setup</li>
+          <li>Install <strong>Git</strong> from <code>git-scm.com</code></li>
+          <li>Open a terminal and run:<br><code>git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui</code></li>
+          <li>Edit <code>webui-user.bat</code> — set <code>COMMANDLINE_ARGS=--api</code> (required for this app to connect)</li>
+          <li>Run <code>webui.bat</code> — first run downloads ~5 GB of dependencies automatically</li>
+          <li>Once running, the server is at <strong>http://127.0.0.1:7860</strong></li>
+          <li>Click <strong>Test Connection</strong> below</li>
+        </ol>
+      </div>
+
+      <!-- ComfyUI panel -->
+      <div id="imggen-panel-comfyui" class="imggen-panel hidden">
+        <p class="imggen-desc">Install ComfyUI — a node-based Stable Diffusion interface. More efficient than AUTOMATIC1111, but requires manual model placement and checkpoint name configuration.</p>
+        <ol class="imggen-steps">
+          <li>Download the <strong>ComfyUI standalone Windows package</strong> from github.com/comfyanonymous/ComfyUI/releases</li>
+          <li>Extract the zip to a folder such as <code>C:\ComfyUI</code></li>
+          <li>Download an SDXL model (e.g. from <code>civitai.com</code> or Hugging Face) and place it in <code>ComfyUI\models\checkpoints\</code></li>
+          <li>Run <code>run_nvidia_gpu.bat</code> (or <code>run_cpu.bat</code> if you have no NVIDIA GPU)</li>
+          <li>The server starts at <strong>http://127.0.0.1:8188</strong></li>
+          <li>Enter the exact checkpoint filename in the <strong>Model Name</strong> field below (e.g. <code>sd_xl_base_1.0.safetensors</code>)</li>
+          <li>Click <strong>Test Connection</strong> below</li>
+        </ol>
+      </div>
+
+      <!-- Connection settings -->
+      <div class="imggen-connection-section">
+        <h4>Connection Settings</h4>
+        <div class="imggen-connection-grid">
+          <div class="field">
+            <label>Backend</label>
+            <select id="imggen-backend">
+              <option value="automatic1111">AUTOMATIC1111</option>
+              <option value="comfyui">ComfyUI</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Server URL</label>
+            <input id="imggen-endpoint" type="text" value="http://127.0.0.1:7860" autocomplete="off" />
+          </div>
+          <div id="imggen-model-wrap" class="field" style="display:none">
+            <label>Checkpoint Name <span class="hint-inline">must match a model loaded in ComfyUI</span></label>
+            <input id="imggen-model" type="text" placeholder="sd_xl_base_1.0.safetensors" autocomplete="off" />
+          </div>
+        </div>
+        <div class="imggen-test-row">
+          <button id="imggen-btn-test" class="btn btn-secondary" type="button">Test Connection</button>
+          <span id="imggen-test-msg" class="sd-test-msg"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="imggen-btn-cancel" class="btn btn-ghost" type="button">Close</button>
+        <button id="imggen-btn-save" class="btn btn-primary" type="button">Enable &amp; Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Trial Expired Paywall ─────────────────────────────────── -->
+  <div id="trial-paywall" class="trial-paywall hidden">
+    <div class="trial-paywall-box">
+      <div class="trial-paywall-icon">🔒</div>
+      <h2 class="trial-paywall-title">Your Free Trial Has Ended</h2>
+      <p class="trial-paywall-sub">You've used your 30-day free trial of ING Listing Engine™.<br>Subscribe to keep analyzing products and publishing to eBay.</p>
+      <div class="trial-paywall-tiers">
+        <div class="trial-tier-card trial-tier-free">
+          <div class="trial-tier-name">Free Trial</div>
+          <div class="trial-tier-status expired">Expired</div>
+        </div>
+        <div class="trial-tier-card trial-tier-pro">
+          <div class="trial-tier-badge">Pro</div>
+          <div class="trial-tier-name">Pro</div>
+          <div class="trial-tier-price">$49.99<span>/mo</span></div>
+          <ul class="trial-tier-features">
+            <li>Unlimited AI listing analysis</li>
+            <li>Unlimited eBay publishing</li>
+            <li>Bulk import from URL</li>
+            <li>Background removal</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+      </div>
+      <button id="trial-subscribe-btn" class="btn btn-primary btn-large" type="button" style="width:100%;margin-top:8px">Subscribe — $49.99/mo</button>
+      <div id="trial-subscribe-msg" style="font-size:12px;margin-top:8px;text-align:center"></div>
+      <p style="font-size:12px;color:var(--muted);margin-top:12px;text-align:center">
+        Already have a key? <button id="trial-enter-key-btn" class="link-btn" type="button">Enter license key</button>
+      </p>
+    </div>
+  </div>
+
+  <script src="app.js?v=14"></script>
+</body>
+</html>
