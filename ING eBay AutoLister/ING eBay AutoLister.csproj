@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>ING_eBay_AutoLister</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <PackageReference Include="Stripe.net" Version="51.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embed static UI files into the assembly so the exe is self-contained -->
+    <Content Remove="wwwroot\index.html" />
+    <Content Remove="wwwroot\reauth.html" />
+    <Content Remove="wwwroot\style.css" />
+    <Content Remove="wwwroot\app.js" />
+    <Content Remove="wwwroot\favicon.svg" />
+    <EmbeddedResource Include="wwwroot\index.html" />
+    <EmbeddedResource Include="wwwroot\reauth.html" />
+    <EmbeddedResource Include="wwwroot\style.css" />
+    <EmbeddedResource Include="wwwroot\app.js" />
+    <EmbeddedResource Include="wwwroot\favicon.svg" />
+  </ItemGroup>
+
+</Project>

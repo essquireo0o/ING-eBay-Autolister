@@ -1,0 +1,41 @@
+# ── Credentials & secrets — NEVER commit these ──────────────────
+credentials.json
+*.env
+.env*
+secrets.json
+
+# ── Build output ─────────────────────────────────────────────────
+bin/
+obj/
+dist/
+
+# ── Runtime data (generated at runtime, not source) ──────────────
+App_Data/
+photos/
+wwwroot/generated-photos/
+**/generated-photos/
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS & editor noise ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vs/
+*.user
+*.suo
+.vscode/
+*.swp
+
+# ── Misc files to exclude ─────────────────────────────────────────
+dashboard_verify.png
+CUsers*.mjs
+installer-out/
+*.claude/
+
+# ── .NET ─────────────────────────────────────────────────────────
+*.pdb
+*.nupkg
+publish/

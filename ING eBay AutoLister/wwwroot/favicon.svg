@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark teal background -->
+  <rect width="32" height="32" rx="6" fill="#082529"/>
+  <!-- Gold price tag shape pointing right -->
+  <path d="M5 10 H19 L27 16 L19 22 H5 Z" fill="#c79a36"/>
+  <!-- Small punch hole near left of tag -->
+  <circle cx="8.5" cy="16" r="2" fill="#082529"/>
+</svg>
