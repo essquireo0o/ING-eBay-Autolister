@@ -158,13 +158,15 @@
     }
   }
 
-  async function buyProLicense() {
-    const btn = $('lp-buy-pro-btn');
+  async function buyProLicense(annual = false) {
+    const btn = annual ? $('lp-buy-annual-btn') : $('lp-buy-pro-btn');
     const msg = $('lp-buy-msg');
+    const endpoint = annual ? '/api/stripe/checkout/annual' : '/api/stripe/checkout';
+    const label    = annual ? 'Annual — $249.99/yr (save $110)' : 'Subscribe — $29.99/mo';
     if (btn) { btn.disabled = true; btn.textContent = 'Opening checkout…'; }
     if (msg) { msg.textContent = ''; }
     try {
-      const res = await fetch('/api/stripe/checkout', { method: 'POST' }).then(r => r.json());
+      const res = await fetch(endpoint, { method: 'POST' }).then(r => r.json());
       if (res.url) {
         window.open(res.url, '_blank');
         if (msg) { msg.textContent = 'Stripe checkout opened. After payment, check your email for your Pro license key.'; msg.className = 'sd-test-msg ok'; }
@@ -174,7 +176,7 @@
     } catch (err) {
       if (msg) { msg.textContent = 'Checkout failed: ' + err.message; msg.className = 'sd-test-msg error'; }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Subscribe — $49.99/mo'; }
+      if (btn) { btn.disabled = false; btn.textContent = label; }
     }
   }
 
@@ -249,7 +251,7 @@
       } catch (err) {
         if (msg) { msg.textContent = err.message; msg.style.color = 'var(--danger)'; }
       } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Subscribe — $49.99/mo'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Subscribe — $29.99/mo'; }
       }
     });
     on('trial-enter-key-btn', 'click', () => {
@@ -487,7 +489,8 @@
     on('btn-open-credentials', 'click', () => openSetupWithPolicies(null));
     on('btn-activate-license', 'click', activateLicense);
     on('lp-activate-btn',     'click', activateLicensePage);
-    on('lp-buy-pro-btn',      'click', buyProLicense);
+    on('lp-buy-pro-btn',      'click', () => buyProLicense(false));
+    on('lp-buy-annual-btn',   'click', () => buyProLicense(true));
     on('btn-close-setup', 'click', () => $('setup-overlay')?.classList.add('hidden'));
     on('setup-overlay', 'click', e => {
       if (e.target === $('setup-overlay')) $('setup-overlay')?.classList.add('hidden');

@@ -22,7 +22,7 @@ Hey r/flipping — I've been selling on eBay for years and got tired of the manu
 
 **Bulk import:** paste a collection/category page URL and it processes every product on the page at once — each one opens as its own tab, all pre-filled.
 
-It runs on your Windows PC as a single .exe — no install, no subscription to start. 30-day free trial, then $49.99/mo if you want to keep it.
+It runs on your Windows PC as a single .exe — no install, no subscription to start. 30-day free trial, then $29.99/mo if you want to keep it.
 
 Works for any product category — electronics, clothing, tools, collectibles, sporting goods, whatever you sell.
 
@@ -92,7 +92,7 @@ For bulk sellers: paste a collection page URL, every product gets processed in p
 - No install — ContentRootPath pinned to exe directory so credentials survive single-file extraction
 - Claude claude-sonnet-4-6 with structured JSON prompts for listing data
 - eBay Sell API for inventory creation and OAuth token management
-- Stripe for $49.99/mo Pro subscriptions
+- Stripe for $29.99/mo Pro subscriptions
 - 30-day trial enforced server-side with TrialGuard middleware
 
 The single-file exe challenge was the interesting part — standard PublishSingleFile doesn't embed wwwroot content. Had to mark UI files as EmbeddedResource and use EmbeddedFileProvider. Also had to pin ContentRootPath to the exe directory rather than the temp extraction dir so credentials.json persists.
@@ -124,7 +124,7 @@ Hey everyone — I wanted to share a tool I built specifically for eBay sellers.
 
 You connect your own eBay seller account via OAuth — it publishes directly using the eBay Sell API.
 
-Works for any product category. Free 30-day trial, then $49.99/month.
+Works for any product category. Free 30-day trial, then $29.99/month.
 
 Download here: https://github.com/essquireo0o/ING-eBay-Autolister/releases/latest
 
@@ -172,7 +172,7 @@ Works for anything you sell. Electronics, clothing, tools, collectibles, sportin
 Built on Claude AI + eBay Sell API. Ships as a single Windows .exe — no install, just double-click. Your credentials stay local, never leave your machine.
 
 **Tweet 5:**
-Free 30 days. Then $49.99/mo if you want to keep it.
+Free 30 days. Then $29.99/mo if you want to keep it.
 
 For eBay sellers who spend hours on listings — this is for you.
 👇 https://github.com/essquireo0o/ING-eBay-Autolister/releases/latest
@@ -199,7 +199,7 @@ For sellers with large inventory: paste a collection page URL and every product 
 
 Built with ASP.NET Core 10 + Claude API + eBay Sell API. Ships as a single Windows exe with no install required.
 
-30-day free trial, then $49.99/mo.
+30-day free trial, then $29.99/mo.
 
 If you sell on eBay or know someone who does: https://github.com/essquireo0o/ING-eBay-Autolister/releases/latest
 
@@ -220,7 +220,7 @@ If you sell on eBay or know someone who does: https://github.com/essquireo0o/ING
 - Single exe file, 108 MB, bundles the entire .NET runtime
 - Works for any product category
 - 30-day free trial to remove friction
-- $49.99/mo after trial
+- $29.99/mo after trial
 
 **Interesting technical challenges:**
 1. Single-file .NET exe with embedded UI — had to use EmbeddedFileProvider instead of static files middleware, mark HTML/CSS/JS as EmbeddedResource in csproj
@@ -249,7 +249,7 @@ Paste any product URL — supplier page, manufacturer site, or existing listing.
 
 Works for any product category. No install — just double-click the exe.
 
-30-day free trial → $49.99/mo Pro.
+30-day free trial → $29.99/mo Pro.
 
 ---
 

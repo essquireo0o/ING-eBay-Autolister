@@ -134,6 +134,23 @@ app.MapPost("/api/stripe/checkout", async (StripeService stripe, HttpContext ctx
     }
 });
 
+app.MapPost("/api/stripe/checkout/annual", async (StripeService stripe, HttpContext ctx) =>
+{
+    if (!stripe.IsConfigured)
+        return Results.BadRequest(new { error = "Stripe not configured." });
+    try
+    {
+        var successUrl = "https://ingmining.com/autolister-pro-success?session_id={CHECKOUT_SESSION_ID}";
+        var cancelUrl  = $"{ctx.Request.Scheme}://{ctx.Request.Host}/";
+        var url = await stripe.CreateProAnnualCheckoutSessionAsync(successUrl, cancelUrl);
+        return Results.Ok(new { url });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 // ── Setup / credentials ───────────────────────────────────────────
 app.MapGet("/api/setup/status", (CredentialsStore store) => Results.Ok(store.GetStatus()));
 app.MapGet("/api/setup/fields", (CredentialsStore store) => Results.Ok(store.GetPublicFields()));

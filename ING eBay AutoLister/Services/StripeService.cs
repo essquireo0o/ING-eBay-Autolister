@@ -9,10 +9,17 @@ public class StripeService(CredentialsStore creds)
 
     public string PublishableKey => creds.Get().StripePublishableKey;
 
-    public async Task<string> CreateProCheckoutSessionAsync(string successUrl, string cancelUrl)
+    public Task<string> CreateProCheckoutSessionAsync(string successUrl, string cancelUrl)
+        => CreateCheckoutSessionAsync("month", 2999, successUrl, cancelUrl);
+
+    public Task<string> CreateProAnnualCheckoutSessionAsync(string successUrl, string cancelUrl)
+        => CreateCheckoutSessionAsync("year", 24999, successUrl, cancelUrl);
+
+    private async Task<string> CreateCheckoutSessionAsync(string interval, long unitAmount, string successUrl, string cancelUrl)
     {
         StripeConfiguration.ApiKey = creds.Get().StripeSecretKey;
 
+        var intervalLabel = interval == "year" ? "Annual" : "Monthly";
         var options = new SessionCreateOptions
         {
             PaymentMethodTypes = ["card"],
@@ -23,15 +30,15 @@ public class StripeService(CredentialsStore creds)
                     PriceData = new SessionLineItemPriceDataOptions
                     {
                         Currency   = "usd",
-                        UnitAmount = 4999, // $49.99
+                        UnitAmount = unitAmount,
                         Recurring  = new SessionLineItemPriceDataRecurringOptions
                         {
-                            Interval = "month"
+                            Interval = interval
                         },
                         ProductData = new SessionLineItemPriceDataProductDataOptions
                         {
-                            Name        = "ING Listing Engine™ — Pro",
-                            Description = "Monthly Pro subscription. Unlimited listings, bulk import, AI image generation, priority support.",
+                            Name        = $"ING Listing Engine™ — Pro ({intervalLabel})",
+                            Description = $"{intervalLabel} Pro subscription. Unlimited listings, bulk import, AI image generation, priority support.",
                             Images      = ["https://ingmining.com/wp-content/uploads/ing-autolister-logo.png"],
                         }
                     },
