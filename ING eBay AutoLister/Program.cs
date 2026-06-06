@@ -101,10 +101,10 @@ _ = Task.Run(async () =>
 // ── Trial ─────────────────────────────────────────────────────────
 app.MapGet("/api/trial/status", (CredentialsStore store, LicenseService license) => Results.Ok(new
 {
-    daysRemaining = store.TrialDaysRemaining(),
-    expired       = store.IsTrialExpired() && !license.Current.Valid,
-    licensed      = license.Current.Valid,
-    tier          = license.Current.Tier
+    daysRemaining = 9999,
+    expired       = false,
+    licensed      = true,
+    tier          = "freeware"
 }));
 
 // ── License ───────────────────────────────────────────────────────
@@ -164,9 +164,7 @@ app.MapPost("/api/setup/save", (Credentials body, CredentialsStore store) =>
 // ── Trial guard ───────────────────────────────────────────────────
 static IResult? TrialGuard(CredentialsStore store, LicenseService license)
 {
-    if (license.Current.Valid) return null; // licensed — always allow
-    if (!store.IsTrialExpired())   return null; // still in trial — allow
-    return Results.Json(new { error = "trial_expired", message = "Your 30-day free trial has ended. Subscribe to continue using ING Listing Engine™.", daysRemaining = 0 }, statusCode: 402);
+    return null; // Freeware — no restrictions
 }
 
 // ── AI analysis ───────────────────────────────────────────────────

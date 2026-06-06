@@ -203,61 +203,12 @@
   }
 
   async function checkTrialStatus() {
-    try {
-      const t = await fetch('/api/trial/status').then(r => r.json());
-
-      const trialBadge   = $('trial-badge');
-      const licenseBadge = $('license-badge');
-
-      if (t.licensed) {
-        // Licensed — updateLicenseUI already set the badge correctly
-        if (trialBadge) trialBadge.classList.add('hidden');
-        return;
-      }
-
-      if (t.expired) {
-        // Trial over and no license — show paywall
-        if (trialBadge) trialBadge.classList.add('hidden');
-        if (licenseBadge) { licenseBadge.textContent = 'Trial Expired'; licenseBadge.className = 'badge badge-off'; }
-        showTrialPaywall();
-        return;
-      }
-
-      // Active trial — show countdown, suppress "Unlicensed" nag
-      const d = t.daysRemaining;
-      if (trialBadge) {
-        trialBadge.textContent = d === 1 ? 'Last day!' : d <= 7 ? `${d} days left` : `Trial: ${d} days left`;
-        trialBadge.classList.remove('hidden');
-      }
-      if (licenseBadge) { licenseBadge.textContent = 'Trial Active'; licenseBadge.className = 'badge badge-warn'; }
-      $('license-nag')?.classList.add('hidden');
-    } catch { /* non-fatal */ }
-  }
-
-  function showTrialPaywall() {
-    $('trial-paywall')?.classList.remove('hidden');
-    on('trial-subscribe-btn', 'click', async () => {
-      const btn = $('trial-subscribe-btn');
-      const msg = $('trial-subscribe-msg');
-      if (btn) { btn.disabled = true; btn.textContent = 'Opening checkout…'; }
-      try {
-        const res = await fetch('/api/stripe/checkout', { method: 'POST' }).then(r => r.json());
-        if (res.url) {
-          window.open(res.url, '_blank');
-          if (msg) { msg.textContent = 'Checkout opened. After payment, enter your key below.'; msg.style.color = 'var(--success)'; }
-        } else {
-          if (msg) { msg.textContent = res.error || 'Could not start checkout.'; msg.style.color = 'var(--danger)'; }
-        }
-      } catch (err) {
-        if (msg) { msg.textContent = err.message; msg.style.color = 'var(--danger)'; }
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Get License Key'; }
-      }
-    });
-    on('trial-enter-key-btn', 'click', () => {
-      $('trial-paywall')?.classList.add('hidden');
-      handleNav('license');
-    });
+    // Freeware — always active, hide trial badge, show Freeware badge
+    const trialBadge   = $('trial-badge');
+    const licenseBadge = $('license-badge');
+    if (trialBadge) trialBadge.classList.add('hidden');
+    if (licenseBadge) { licenseBadge.textContent = 'Freeware'; licenseBadge.className = 'badge badge-on'; }
+    $('license-nag')?.classList.add('hidden');
   }
 
   function updateLicenseUI(status) {
@@ -273,9 +224,9 @@
       if (dot) dot.className = `nav-license-dot ${status.tier === 'unverified' ? 'dot-warn' : 'dot-on'}`;
       $('license-nag')?.classList.add('hidden');
     } else {
-      if (badge) { badge.textContent = 'Unlicensed'; badge.className = 'badge badge-off'; }
-      if (dot) dot.className = 'nav-license-dot dot-off';
-      if (!sessionStorage.getItem('licenseNagDismissed')) $('license-nag')?.classList.remove('hidden');
+      if (badge) { badge.textContent = 'Freeware'; badge.className = 'badge badge-on'; }
+      if (dot) dot.className = 'nav-license-dot dot-on';
+      $('license-nag')?.classList.add('hidden');
     }
     const activateMsg = $('license-activate-msg');
     if (activateMsg && status.message) {
@@ -295,9 +246,9 @@
     if (tierLabel) {
       tierLabel.textContent = status.valid
         ? (status.tier === 'pro' ? 'Pro License Active' : status.tier === 'free' ? 'Free License Active' : 'License Active (offline)')
-        : 'Unlicensed';
+        : 'Freeware';
     }
-    if (statusMsg) statusMsg.textContent = status.message || (status.valid ? 'Your license is valid.' : 'Enter a key below to activate.');
+    if (statusMsg) statusMsg.textContent = status.message || (status.valid ? 'Your license is valid.' : 'ING Listing Engine™ is Freeware — use key ING-BETA-2025.');
     if (pageMsg && status.message) {
       pageMsg.textContent = status.message;
       pageMsg.className = 'sd-test-msg ' + (status.valid ? 'ok' : 'error');
