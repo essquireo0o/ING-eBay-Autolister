@@ -212,6 +212,41 @@ app.MapPost("/api/analyze-url", async (AnalyzeUrlRequest req, ClaudeService clau
                 catch { /* non-fatal */ }
             }
 
+            // Rewrite the description with Claude SEO template — the original seller's
+            // description is often plain text or poorly formatted HTML
+            try
+            {
+                log.Add("Info", "Rewriting eBay description with Claude SEO template", ebayItemId);
+                var improved = await claude.ImproveSeoAsync(new ImproveSeoRequest
+                {
+                    Title         = item.Title ?? "",
+                    Subtitle      = item.Subtitle ?? "",
+                    Category      = item.Category ?? "",
+                    Condition     = item.Condition ?? "",
+                    Brand         = item.Brand ?? "",
+                    Price         = item.Price,
+                    Description   = item.Description ?? "",
+                    ItemSpecifics = item.ItemSpecifics ?? [],
+                    Quantity                 = item.Quantity,
+                    WeightLbs                = item.WeightLbs,
+                    WeightOz                 = item.WeightOz,
+                    PackageLengthIn          = item.PackageLengthIn,
+                    PackageWidthIn           = item.PackageWidthIn,
+                    PackageHeightIn          = item.PackageHeightIn,
+                    HandlingTimeBusinessDays = item.HandlingTimeBusinessDays,
+                    ItemLocationPostalCode   = item.ItemLocationPostalCode ?? "",
+                    ImageUrls                = item.ImageUrls,
+                });
+                // Keep original structured data — only take the rewritten description and title
+                item.Description = improved.Description;
+                if (!string.IsNullOrWhiteSpace(improved.Title)) item.Title = improved.Title;
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — return original data if Claude rewrite fails
+                log.Add("Warning", "eBay description SEO rewrite failed", ex.Message);
+            }
+
             return Results.Ok(item);
         }
 
