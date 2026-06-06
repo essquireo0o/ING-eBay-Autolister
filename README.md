@@ -85,7 +85,7 @@ Before publishing, the app fills in package dimensions (weight, length, width, h
 | Plan | Price | What's included |
 |------|-------|----------------|
 | **Free** | $0 | AI listing analysis, publish to eBay, draft save & management, background removal, category browser, up to 50 listings/month |
-| **Pro** | $29.99/mo or $249.99/yr | Everything in Free + unlimited listings, bulk import from URL, AI image generation, priority support, early access to new features |
+| **Pro** | Free | Everything in Free + unlimited listings, bulk import from URL, AI image generation, priority support, early access to new features |
 
 Beta testers get free Pro access — check the License page in the app for the current beta key.
 

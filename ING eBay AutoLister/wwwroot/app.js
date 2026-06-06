@@ -162,7 +162,7 @@
     const btn = annual ? $('lp-buy-annual-btn') : $('lp-buy-pro-btn');
     const msg = $('lp-buy-msg');
     const endpoint = annual ? '/api/stripe/checkout/annual' : '/api/stripe/checkout';
-    const label    = annual ? 'Annual — $249.99/yr (save $110)' : 'Subscribe — $29.99/mo';
+    const label    = annual ? 'Annual — $249.99/yr (save $110)' : 'Get License Key';
     if (btn) { btn.disabled = true; btn.textContent = 'Opening checkout…'; }
     if (msg) { msg.textContent = ''; }
     try {
@@ -251,7 +251,7 @@
       } catch (err) {
         if (msg) { msg.textContent = err.message; msg.style.color = 'var(--danger)'; }
       } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Subscribe — $29.99/mo'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Get License Key'; }
       }
     });
     on('trial-enter-key-btn', 'click', () => {
