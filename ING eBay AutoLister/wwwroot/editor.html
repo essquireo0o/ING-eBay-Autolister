@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo Editor — ING Listing Engine</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  background:#0d1117;color:#e6edf3;
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;
+  user-select:none;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+#pe-header{
+  background:#161b22;border-bottom:1px solid #30363d;
+  padding:0 14px;height:50px;display:flex;align-items:center;
+  gap:3px;flex-shrink:0;
+}
+.pe-tab{
+  padding:5px 14px;border:1px solid transparent;border-radius:6px;
+  background:transparent;color:#8b949e;cursor:pointer;
+  font-size:13px;font-weight:600;white-space:nowrap;transition:all .12s;
+}
+.pe-tab:hover{color:#e6edf3;background:#21262d}
+.pe-tab.active{color:#fff;background:#21262d;border-color:#ffc300}
+.pe-sep{width:1px;height:26px;background:#30363d;margin:0 8px;flex-shrink:0}
+.pe-spacer{flex:1}
+#pe-title{font-size:12px;color:#6e7681;white-space:nowrap}
+.btn-cancel{
+  padding:5px 16px;background:#21262d;border:1px solid #30363d;
+  border-radius:6px;color:#8b949e;font-size:13px;font-weight:600;cursor:pointer;
+}
+.btn-cancel:hover{color:#e6edf3}
+.btn-save{
+  padding:5px 20px;background:#ffc300;border:none;border-radius:6px;
+  color:#111;font-size:13px;font-weight:700;cursor:pointer;margin-left:6px;
+}
+.btn-save:hover{background:#e6b000}
+.btn-save:disabled{opacity:.5;cursor:default}
+
+/* ── Tool panel ─────────────────────────────────────────────── */
+#pe-panel{
+  background:#161b22;border-bottom:1px solid #30363d;
+  padding:8px 16px;min-height:50px;flex-shrink:0;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+}
+.pe-hint{color:#6e7681;font-size:12px}
+.tbtn{
+  padding:4px 15px;background:#ffc300;border:none;border-radius:5px;
+  color:#111;font-size:12px;font-weight:700;cursor:pointer;
+}
+.tbtn:disabled{opacity:.4;cursor:default}
+.tbtn:not(:disabled):hover{background:#e6b000}
+.tbtn-sec{
+  padding:4px 13px;background:#21262d;border:1px solid #30363d;
+  border-radius:5px;color:#8b949e;font-size:12px;font-weight:600;cursor:pointer;
+}
+.tbtn-sec:hover{color:#e6edf3}
+.pe-lbl{
+  display:flex;align-items:center;gap:7px;
+  font-size:12px;font-weight:600;color:#c9d1d9;white-space:nowrap;
+}
+.pe-lbl input[type=range]{width:100px;accent-color:#ffc300;cursor:pointer}
+.pe-lbl input[type=color]{
+  width:30px;height:24px;border:1px solid #30363d;border-radius:3px;
+  cursor:pointer;padding:1px;background:#21262d;
+}
+.pe-lbl span.val{min-width:30px;color:#8b949e}
+.filter-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fbtn{
+  padding:4px 13px;border:1px solid #30363d;border-radius:5px;
+  background:#21262d;color:#8b949e;cursor:pointer;font-size:12px;font-weight:600;
+}
+.fbtn:hover{border-color:#6e7681;color:#e6edf3}
+.fbtn.on{background:#ffc300;border-color:#ffc300;color:#111}
+
+/* ── Canvas area ─────────────────────────────────────────────── */
+#pe-area{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  background:#010409;overflow:hidden;position:relative;
+}
+#pe-wrap{position:relative;display:inline-flex;line-height:0}
+#pe-canvas{
+  display:block;
+  max-width:calc(100vw - 32px);
+  max-height:calc(100vh - 130px);
+  width:auto;height:auto;
+  background-color:#1e1e1e;
+  background-image:
+    linear-gradient(45deg,#2a2a2a 25%,transparent 25%),
+    linear-gradient(-45deg,#2a2a2a 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#2a2a2a 75%),
+    linear-gradient(-45deg,transparent 75%,#2a2a2a 75%);
+  background-size:16px 16px;
+  background-position:0 0,0 8px,8px -8px,-8px 0;
+  box-shadow:0 4px 32px rgba(0,0,0,.7);
+}
+#pe-ov{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  display:block;pointer-events:none;
+}
+
+/* ── Loading overlay ──────────────────────────────────────────── */
+#pe-load{
+  position:absolute;inset:0;background:#0d1117;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;font-size:15px;color:#8b949e;z-index:50;
+}
+#pe-load.gone{display:none}
+.spinner{
+  width:36px;height:36px;border:3px solid #30363d;
+  border-top-color:#ffc300;border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div id="pe-header">
+  <button class="pe-tab active" data-tool="crop">✂ Crop</button>
+  <button class="pe-tab" data-tool="adjustment">◐ Adjustment</button>
+  <button class="pe-tab" data-tool="filter">✦ Filter</button>
+  <button class="pe-tab" data-tool="markup">✏ Markup</button>
+  <button class="pe-tab" data-tool="erase">◻ Erase</button>
+  <button class="pe-tab" data-tool="background">⬡ Background</button>
+  <div class="pe-sep"></div>
+  <span id="pe-title">Photo Editor</span>
+  <div class="pe-spacer"></div>
+  <button class="btn-cancel" id="btn-cancel">Cancel</button>
+  <button class="btn-save"   id="btn-save">Save</button>
+</div>
+
+<div id="pe-panel"><span class="pe-hint">Waiting for image…</span></div>
+
+<div id="pe-area">
+  <div id="pe-load"><div class="spinner"></div>Loading image…</div>
+  <div id="pe-wrap">
+    <canvas id="pe-canvas"></canvas>
+    <canvas id="pe-ov"></canvas>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let canvas, ctx, ov, oCtx;
+let slotIndex = -1;
+let tool = 'crop';
+let undos = [];
+
+let cropDrag = null;   // {sx,sy,ex,ey} while dragging
+let cropRect = null;   // {x,y,w,h} confirmed
+
+let drawing = false, lastPt = null;
+let drawColor = '#ff0000', drawSize = 10;
+
+let adj = {brightness:100, contrast:100, saturation:100};
+let liveFilter = '';
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  canvas = document.getElementById('pe-canvas');
+  ctx    = canvas.getContext('2d');
+  ov     = document.getElementById('pe-ov');
+  oCtx   = ov.getContext('2d');
+
+  document.querySelectorAll('.pe-tab').forEach(t =>
+    t.addEventListener('click', () => setTool(t.dataset.tool)));
+
+  document.getElementById('btn-cancel').addEventListener('click', doCancel);
+  document.getElementById('btn-save').addEventListener('click', doSave);
+
+  ov.addEventListener('mousedown',  onDown);
+  ov.addEventListener('mousemove',  onMove);
+  ov.addEventListener('mouseup',    onUp);
+  ov.addEventListener('mouseleave', onUp);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') doCancel();
+    if ((e.ctrlKey||e.metaKey) && e.key==='z') undo();
+  });
+
+  // Signal opener we are ready
+  if (window.opener) window.opener.postMessage({type:'editor-ready'}, '*');
+
+  // Receive image
+  window.addEventListener('message', e => {
+    if (e.data?.type === 'load-image') loadImg(e.data.url, e.data.slotIndex, e.data.label);
+  });
+});
+
+// ── Load image ──────────────────────────────────────────────────────────────
+async function loadImg(url, slot, label) {
+  slotIndex = slot;
+  const loader = document.getElementById('pe-load');
+  loader.classList.remove('gone');
+
+  // Convert to data-URL to avoid canvas CORS taint
+  let dataUrl = url;
+  if (url && !url.startsWith('data:')) {
+    try {
+      const res  = await fetch(url);
+      const blob = await res.blob();
+      dataUrl = await blobToDataUrl(blob);
+    } catch { dataUrl = url; }
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    const MAX = 3000;
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (w > MAX || h > MAX) { const s=MAX/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+    canvas.width  = w; canvas.height  = h;
+    ov.width      = w; ov.height      = h;
+    ctx.drawImage(img, 0, 0, w, h);
+    undos = [];
+    adj = {brightness:100,contrast:100,saturation:100};
+    liveFilter = '';
+    canvas.style.filter = '';
+    loader.classList.add('gone');
+    if (label) document.getElementById('pe-title').textContent = label;
+    setTool('crop');
+  };
+  img.onerror = () => { loader.innerHTML = '<span style="color:#f85149">Could not load image.</span>'; };
+  img.src = dataUrl;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((ok, fail) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = fail;
+    fr.readAsDataURL(blob);
+  });
+}
+
+// ── Tool switching ──────────────────────────────────────────────────────────
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.pe-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tool===t));
+  renderPanel();
+
+  const interactive = t==='crop'||t==='markup'||t==='erase';
+  ov.style.pointerEvents = interactive ? 'auto' : 'none';
+  ov.style.cursor = interactive ? 'crosshair' : 'default';
+
+  if (t !== 'crop') { cropDrag=null; cropRect=null; oCtx.clearRect(0,0,ov.width,ov.height); }
+  if (t !== 'adjustment' && t !== 'filter') { canvas.style.filter=''; liveFilter=''; }
+}
+
+function renderPanel() {
+  const p = document.getElementById('pe-panel');
+
+  if (tool === 'crop') {
+    p.innerHTML = `<span class="pe-hint">Drag on the image to select the area to keep</span>
+      <button class="tbtn" id="t-crop-ok" disabled>Apply Crop</button>
+      <button class="tbtn-sec" id="t-crop-rst">Reset</button>`;
+    document.getElementById('t-crop-ok').addEventListener('click', applyCrop);
+    document.getElementById('t-crop-rst').addEventListener('click', () => {
+      cropDrag=null; cropRect=null;
+      oCtx.clearRect(0,0,ov.width,ov.height);
+      document.getElementById('t-crop-ok').disabled = true;
+    });
+
+  } else if (tool === 'adjustment') {
+    p.innerHTML = `
+      <label class="pe-lbl">Brightness
+        <input type="range" id="t-br" min="0" max="200" value="${adj.brightness}">
+        <span class="val" id="v-br">${adj.brightness}</span>%
+      </label>
+      <label class="pe-lbl">Contrast
+        <input type="range" id="t-cr" min="0" max="200" value="${adj.contrast}">
+        <span class="val" id="v-cr">${adj.contrast}</span>%
+      </label>
+      <label class="pe-lbl">Saturation
+        <input type="range" id="t-sa" min="0" max="200" value="${adj.saturation}">
+        <span class="val" id="v-sa">${adj.saturation}</span>%
+      </label>
+      <button class="tbtn" id="t-adj-ok">Apply</button>
+      <button class="tbtn-sec" id="t-adj-rst">Reset</button>`;
+
+    [['br','brightness'],['cr','contrast'],['sa','saturation']].forEach(([id,prop]) => {
+      document.getElementById('t-'+id).addEventListener('input', e => {
+        adj[prop] = parseInt(e.target.value);
+        document.getElementById('v-'+id).textContent = adj[prop];
+        liveFilter = `brightness(${adj.brightness}%) contrast(${adj.contrast}%) saturate(${adj.saturation}%)`;
+        canvas.style.filter = liveFilter;
+      });
+    });
+    document.getElementById('t-adj-ok').addEventListener('click', burnFilter);
+    document.getElementById('t-adj-rst').addEventListener('click', () => {
+      adj={brightness:100,contrast:100,saturation:100};
+      ['br','cr','sa'].forEach(id => {
+        document.getElementById('t-'+id).value='100';
+        document.getElementById('v-'+id).textContent='100';
+      });
+      liveFilter=''; canvas.style.filter='';
+    });
+
+  } else if (tool === 'filter') {
+    const presets=[
+      {n:'Normal',f:''},
+      {n:'B&W',   f:'grayscale(1)'},
+      {n:'Sepia', f:'sepia(0.8)'},
+      {n:'Warm',  f:'sepia(0.25) saturate(1.5) brightness(1.05)'},
+      {n:'Cool',  f:'hue-rotate(20deg) saturate(1.2) brightness(1.02)'},
+      {n:'Vivid', f:'saturate(1.9) contrast(1.1)'},
+      {n:'Fade',  f:'contrast(0.82) brightness(1.1) saturate(0.85)'},
+      {n:'Sharp', f:'contrast(1.25) brightness(0.97)'},
+    ];
+    p.innerHTML = `<div class="filter-row">${
+      presets.map(p=>`<button class="fbtn${p.f===liveFilter?' on':''}" data-f="${p.f}">${p.n}</button>`).join('')
+    }</div>
+    <button class="tbtn" id="t-flt-ok"${!liveFilter?' disabled':''}>Apply Filter</button>`;
+    p.querySelectorAll('.fbtn').forEach(b => b.addEventListener('click', () => {
+      p.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      liveFilter=b.dataset.f; canvas.style.filter=liveFilter;
+      document.getElementById('t-flt-ok').disabled=!liveFilter;
+    }));
+    document.getElementById('t-flt-ok').addEventListener('click', burnFilter);
+
+  } else if (tool === 'markup') {
+    p.innerHTML = `
+      <label class="pe-lbl">Color <input type="color" id="t-col" value="${drawColor}"></label>
+      <label class="pe-lbl">Size
+        <input type="range" id="t-sz" min="2" max="80" value="${drawSize}">
+        <span class="val" id="v-sz">${drawSize}</span>px
+      </label>
+      <button class="tbtn-sec" id="t-undo">↩ Undo</button>`;
+    document.getElementById('t-col').addEventListener('input', e=>drawColor=e.target.value);
+    document.getElementById('t-sz').addEventListener('input', e=>{
+      drawSize=parseInt(e.target.value);
+      document.getElementById('v-sz').textContent=drawSize;
+    });
+    document.getElementById('t-undo').addEventListener('click', undo);
+
+  } else if (tool === 'erase') {
+    p.innerHTML = `
+      <label class="pe-lbl">Eraser Size
+        <input type="range" id="t-esz" min="4" max="120" value="${drawSize}">
+        <span class="val" id="v-esz">${drawSize}</span>px
+      </label>
+      <button class="tbtn-sec" id="t-undo2">↩ Undo</button>`;
+    document.getElementById('t-esz').addEventListener('input', e=>{
+      drawSize=parseInt(e.target.value);
+      document.getElementById('v-esz').textContent=drawSize;
+    });
+    document.getElementById('t-undo2').addEventListener('click', undo);
+
+  } else if (tool === 'background') {
+    p.innerHTML = `<span class="pe-hint">AI removes the background — works best on product shots</span>
+      <button class="tbtn" id="t-rmbg">Remove Background</button>`;
+    document.getElementById('t-rmbg').addEventListener('click', doRemoveBg);
+  }
+}
+
+// ── Undo ────────────────────────────────────────────────────────────────────
+function pushUndo() {
+  undos.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+  if (undos.length>20) undos.shift();
+}
+function undo() { const s=undos.pop(); if(s) ctx.putImageData(s,0,0); }
+
+// ── Crop helpers ─────────────────────────────────────────────────────────────
+function calcCropRect() {
+  if (!cropDrag) return null;
+  const x=Math.min(cropDrag.sx,cropDrag.ex), y=Math.min(cropDrag.sy,cropDrag.ey);
+  const w=Math.abs(cropDrag.ex-cropDrag.sx), h=Math.abs(cropDrag.ey-cropDrag.sy);
+  return (w<4||h<4)?null:{x:Math.round(x),y:Math.round(y),w:Math.round(w),h:Math.round(h)};
+}
+function drawCropUi() {
+  oCtx.clearRect(0,0,ov.width,ov.height);
+  const r=calcCropRect(); if(!r) return;
+  oCtx.fillStyle='rgba(0,0,0,0.5)';
+  oCtx.fillRect(0,0,ov.width,ov.height);
+  oCtx.clearRect(r.x,r.y,r.w,r.h);
+  oCtx.strokeStyle='#ffc300'; oCtx.lineWidth=2;
+  oCtx.strokeRect(r.x+1,r.y+1,r.w-2,r.h-2);
+  oCtx.strokeStyle='rgba(255,195,0,0.3)'; oCtx.lineWidth=1;
+  for(let i=1;i<3;i++){
+    oCtx.beginPath(); oCtx.moveTo(r.x+r.w*i/3,r.y); oCtx.lineTo(r.x+r.w*i/3,r.y+r.h); oCtx.stroke();
+    oCtx.beginPath(); oCtx.moveTo(r.x,r.y+r.h*i/3); oCtx.lineTo(r.x+r.w,r.y+r.h*i/3); oCtx.stroke();
+  }
+}
+function applyCrop() {
+  const r=cropRect||calcCropRect(); if(!r) return;
+  pushUndo();
+  const data=ctx.getImageData(r.x,r.y,r.w,r.h);
+  canvas.width=r.w; canvas.height=r.h;
+  ov.width=r.w; ov.height=r.h;
+  ctx.putImageData(data,0,0);
+  cropDrag=null; cropRect=null;
+  const b=document.getElementById('t-crop-ok'); if(b) b.disabled=true;
+}
+
+// ── Filter burn-in ───────────────────────────────────────────────────────────
+function burnFilter() {
+  if (!liveFilter) return;
+  pushUndo();
+  const tmp=document.createElement('canvas');
+  tmp.width=canvas.width; tmp.height=canvas.height;
+  const tc=tmp.getContext('2d');
+  tc.filter=liveFilter; tc.drawImage(canvas,0,0);
+  ctx.filter='none';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(tmp,0,0);
+  canvas.style.filter=''; liveFilter='';
+  adj={brightness:100,contrast:100,saturation:100};
+  document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('on'));
+  const ab=document.getElementById('t-flt-ok'); if(ab) ab.disabled=true;
+}
+
+// ── Pointer → canvas coords ──────────────────────────────────────────────────
+function toCanvas(e) {
+  const r=ov.getBoundingClientRect();
+  return {
+    x:Math.round((e.clientX-r.left)*(ov.width/r.width)),
+    y:Math.round((e.clientY-r.top) *(ov.height/r.height))
+  };
+}
+
+// ── Mouse events ─────────────────────────────────────────────────────────────
+function onDown(e) {
+  if (tool==='crop') {
+    const pt=toCanvas(e);
+    cropDrag={sx:pt.x,sy:pt.y,ex:pt.x,ey:pt.y};
+    const b=document.getElementById('t-crop-ok'); if(b) b.disabled=true;
+  } else if (tool==='markup'||tool==='erase') {
+    pushUndo(); drawing=true; lastPt=toCanvas(e); dot(lastPt);
+  }
+}
+function onMove(e) {
+  if (tool==='crop'&&cropDrag) {
+    const pt=toCanvas(e); cropDrag.ex=pt.x; cropDrag.ey=pt.y;
+    drawCropUi();
+    const b=document.getElementById('t-crop-ok'); if(b) b.disabled=!calcCropRect();
+  } else if ((tool==='markup'||tool==='erase')&&drawing) {
+    const pt=toCanvas(e); line(lastPt,pt); lastPt=pt;
+  }
+}
+function onUp(e) {
+  if (tool==='crop'&&cropDrag) {
+    const pt=toCanvas(e); cropDrag.ex=pt.x; cropDrag.ey=pt.y;
+    drawCropUi(); cropRect=calcCropRect();
+    const b=document.getElementById('t-crop-ok'); if(b) b.disabled=!cropRect;
+  }
+  drawing=false; lastPt=null;
+}
+
+function dot(pt) {
+  ctx.save();
+  ctx.globalCompositeOperation=tool==='erase'?'destination-out':'source-over';
+  ctx.fillStyle=tool==='erase'?'rgba(0,0,0,1)':drawColor;
+  ctx.beginPath(); ctx.arc(pt.x,pt.y,drawSize/2,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function line(a,b) {
+  ctx.save();
+  ctx.globalCompositeOperation=tool==='erase'?'destination-out':'source-over';
+  ctx.strokeStyle=tool==='erase'?'rgba(0,0,0,1)':drawColor;
+  ctx.lineWidth=drawSize; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  ctx.restore();
+}
+
+// ── Background removal ────────────────────────────────────────────────────────
+async function doRemoveBg() {
+  const btn=document.getElementById('t-rmbg');
+  if(btn){btn.textContent='Working…';btn.disabled=true;}
+  try {
+    pushUndo();
+    const b64=canvas.toDataURL('image/png').split(',')[1];
+    const res=await fetch('/api/photos/remove-bg',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({imageBase64:b64,mimeType:'image/png'})
+    });
+    const body=await res.json();
+    if(!res.ok) throw new Error(body.error||'Failed');
+    const img=new Image();
+    img.onload=()=>{
+      canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+      ov.width=img.naturalWidth; ov.height=img.naturalHeight;
+      ctx.clearRect(0,0,img.naturalWidth,img.naturalHeight);
+      ctx.drawImage(img,0,0);
+    };
+    img.src=body.url;
+  } catch(err) { alert('Background removal failed: '+err.message); }
+  finally { if(btn){btn.textContent='Remove Background';btn.disabled=false;} }
+}
+
+// ── Save / Cancel ─────────────────────────────────────────────────────────────
+async function doSave() {
+  const btn=document.getElementById('btn-save');
+  btn.textContent='Saving…'; btn.disabled=true;
+  try {
+    if (cropRect) applyCrop();
+    if (liveFilter) burnFilter();
+    const b64=canvas.toDataURL('image/jpeg',0.92).split(',')[1];
+    const res=await fetch('/api/photos/save-uploaded',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({imageBase64:b64,mimeType:'image/jpeg'})
+    });
+    const d=res.ok?await res.json():null;
+    const url=d?.url||('data:image/jpeg;base64,'+b64);
+    if(window.opener) window.opener.postMessage({type:'photo-editor-save',slotIndex,url},'*');
+    window.close();
+  } catch(err) {
+    alert('Save failed: '+err.message);
+    btn.textContent='Save'; btn.disabled=false;
+  }
+}
+function doCancel() {
+  if(window.opener) window.opener.postMessage({type:'photo-editor-cancel'},'*');
+  window.close();
+}
+</script>
+</body>
+</html>

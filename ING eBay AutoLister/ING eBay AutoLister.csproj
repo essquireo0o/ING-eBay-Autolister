@@ -21,11 +21,13 @@
     <Content Remove="wwwroot\style.css" />
     <Content Remove="wwwroot\app.js" />
     <Content Remove="wwwroot\favicon.svg" />
+    <Content Remove="wwwroot\editor.html" />
     <EmbeddedResource Include="wwwroot\index.html" />
     <EmbeddedResource Include="wwwroot\reauth.html" />
     <EmbeddedResource Include="wwwroot\style.css" />
     <EmbeddedResource Include="wwwroot\app.js" />
     <EmbeddedResource Include="wwwroot\favicon.svg" />
+    <EmbeddedResource Include="wwwroot\editor.html" />
   </ItemGroup>
 
 </Project>

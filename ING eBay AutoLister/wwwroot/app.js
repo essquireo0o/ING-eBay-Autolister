@@ -3564,21 +3564,10 @@
       .replace(/>/g, '&gt;');
   }
 
-  // ── Photo Editor ─────────────────────────────────────────────────────────
-
-  let peSlotIndex  = -1;
-  let peCanvas     = null, peCtx     = null;
-  let peOvCanvas   = null, peOvCtx   = null;
-  let peTool       = 'crop';
-  let peCropDrag   = null; // {startX,startY,endX,endY} in canvas coords while dragging
-  let peCropRect   = null; // confirmed {x,y,w,h} after mouse-up
-  let peDrawing    = false, peLastPt = null;
-  let peDrawColor  = '#ff0000', peDrawSize = 10;
-  let peAdj        = { brightness: 100, contrast: 100, saturation: 100 };
-  let pePreviewFilter = '';
-  let peUndoStack  = [];
+  // ── Photo Editor (opens in new window) ───────────────────────────────────
 
   function initPhotoEditorPaste() {
+    // Paste image from clipboard into next empty slot
     document.addEventListener('paste', e => {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
@@ -3597,427 +3586,45 @@
         }
       }
     });
-  }
-
-  function buildPhotoEditorDOM() {
-    const modal = document.createElement('div');
-    modal.id = 'photo-editor-modal';
-    modal.className = 'hidden';
-    modal.innerHTML = `
-      <div class="pe-header">
-        <button class="pe-tab active" data-tool="crop">✂ Crop</button>
-        <button class="pe-tab" data-tool="adjustment">◐ Adjustment</button>
-        <button class="pe-tab" data-tool="filter">✦ Filter</button>
-        <button class="pe-tab" data-tool="markup">✏ Markup</button>
-        <button class="pe-tab" data-tool="erase">◻ Erase</button>
-        <button class="pe-tab" data-tool="background">⬡ Background</button>
-        <div class="pe-spacer"></div>
-        <button id="pe-cancel" class="pe-btn-cancel">Cancel</button>
-        <button id="pe-save"   class="pe-btn-save">Save</button>
-      </div>
-      <div id="pe-tool-panel" class="pe-tool-panel"></div>
-      <div class="pe-canvas-area">
-        <div class="pe-canvas-wrap">
-          <canvas id="pe-canvas"></canvas>
-          <canvas id="pe-overlay"></canvas>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-
-    modal.querySelectorAll('.pe-tab').forEach(tab => tab.addEventListener('click', () => peSetTool(tab.dataset.tool)));
-    modal.querySelector('#pe-save')?.addEventListener('click', peSave);
-    modal.querySelector('#pe-cancel')?.addEventListener('click', peCancel);
-    document.addEventListener('keydown', e => {
-      if (!$('photo-editor-modal') || $('photo-editor-modal').classList.contains('hidden')) return;
-      if (e.key === 'Escape') peCancel();
+    // Receive saved image back from the editor window
+    window.addEventListener('message', e => {
+      if (e.data?.type === 'photo-editor-save') {
+        setPhotoSlotUrl(e.data.slotIndex, e.data.url);
+        addActivity('Photo edited', `Picture ${e.data.slotIndex + 1}`);
+      }
     });
-
-    peCanvas   = modal.querySelector('#pe-canvas');
-    peCtx      = peCanvas.getContext('2d');
-    peOvCanvas = modal.querySelector('#pe-overlay');
-    peOvCtx    = peOvCanvas.getContext('2d');
-
-    peOvCanvas.addEventListener('mousedown',  peOvMouseDown);
-    peOvCanvas.addEventListener('mousemove',  peOvMouseMove);
-    peOvCanvas.addEventListener('mouseup',    peOvMouseUp);
-    peOvCanvas.addEventListener('mouseleave', peOvMouseUp);
   }
 
-  async function openPhotoEditor(slotIndex) {
-    peSlotIndex = slotIndex;
-    const slot  = getPhotoSlot(slotIndex);
+  function openPhotoEditor(slotIndex) {
+    const slot = getPhotoSlot(slotIndex);
     if (!slot?.classList.contains('has-image')) return;
 
-    if (!$('photo-editor-modal')) {
-      buildPhotoEditorDOM();
-    } else {
-      peCanvas   = document.getElementById('pe-canvas');
-      peCtx      = peCanvas?.getContext('2d');
-      peOvCanvas = document.getElementById('pe-overlay');
-      peOvCtx    = peOvCanvas?.getContext('2d');
+    const win = window.open(
+      '/editor.html', 'photo-editor',
+      'width=1280,height=840,resizable=yes,scrollbars=no,toolbar=no,menubar=no'
+    );
+    if (!win) {
+      alert('Please allow pop-ups for this site to use the photo editor.');
+      return;
     }
 
-    const url   = slot.dataset.url;
-    const modal = $('photo-editor-modal');
-    modal.classList.remove('hidden');
-
-    // Convert any URL to a data URL so the canvas is never CORS-tainted
-    let dataUrl = url;
-    if (url && !url.startsWith('data:')) {
-      try {
-        const res  = await fetch(url);
-        const blob = await res.blob();
-        dataUrl = await new Promise((resolve, reject) => {
-          const fr = new FileReader();
-          fr.onload  = () => resolve(fr.result);
-          fr.onerror = reject;
-          fr.readAsDataURL(blob);
-        });
-      } catch { dataUrl = url; }
-    }
-
-    const img = new Image();
-    img.onload = () => {
-      const maxDim = 3000;
-      let w = img.naturalWidth, h = img.naturalHeight;
-      if (w > maxDim || h > maxDim) {
-        const s = maxDim / Math.max(w, h);
-        w = Math.round(w * s); h = Math.round(h * s);
-      }
-      peCanvas.width    = w;  peCanvas.height    = h;
-      peOvCanvas.width  = w;  peOvCanvas.height  = h;
-      peCtx.drawImage(img, 0, 0, w, h);
-      peCropDrag = null; peCropRect = null;
-      peUndoStack = [];
-      peAdj = { brightness: 100, contrast: 100, saturation: 100 };
-      pePreviewFilter = '';
-      peCanvas.style.filter = '';
-      modal.querySelectorAll('.pe-tab').forEach(t => t.classList.toggle('active', t.dataset.tool === 'crop'));
-      peSetTool('crop');
+    // When the editor signals it is ready, send the image
+    const readyHandler = ev => {
+      if (ev.data?.type !== 'editor-ready') return;
+      window.removeEventListener('message', readyHandler);
+      win.postMessage({
+        type: 'load-image',
+        url: slot.dataset.url,
+        slotIndex,
+        label: `Picture ${slotIndex + 1}`
+      }, '*');
     };
-    img.src = dataUrl;
-  }
+    window.addEventListener('message', readyHandler);
 
-  function peCancel() {
-    $('photo-editor-modal')?.classList.add('hidden');
-    peOvCtx?.clearRect(0, 0, peOvCanvas?.width || 0, peOvCanvas?.height || 0);
-    if (peCanvas) peCanvas.style.filter = '';
-    pePreviewFilter = '';
-    peSlotIndex = -1;
-  }
-
-  async function peSave() {
-    if (!peCanvas || peSlotIndex === -1) return;
-    const btn = document.getElementById('pe-save');
-    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
-    try {
-      if (peCropRect) peApplyCrop();
-      if (pePreviewFilter) peApplyCurrentFilter();
-      const dataUrl = peCanvas.toDataURL('image/jpeg', 0.92);
-      const base64  = dataUrl.split(',')[1];
-      const res = await fetch('/api/photos/save-uploaded', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64, mimeType: 'image/jpeg' })
-      });
-      const d = res.ok ? await res.json() : null;
-      setPhotoSlotUrl(peSlotIndex, d?.url || dataUrl);
-      addActivity('Photo edited', `Picture ${peSlotIndex + 1}`);
-      peCancel();
-    } catch (err) {
-      alert('Save failed: ' + err.message);
-    } finally {
-      if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
-    }
-  }
-
-  function peSetTool(tool) {
-    peTool = tool;
-    $('photo-editor-modal')?.querySelectorAll('.pe-tab').forEach(t => t.classList.toggle('active', t.dataset.tool === tool));
-    peRenderToolPanel(tool);
-    if (peOvCanvas) {
-      const active = ['crop', 'markup', 'erase'].includes(tool);
-      peOvCanvas.style.pointerEvents = active ? 'auto' : 'none';
-      peOvCanvas.style.cursor = active ? 'crosshair' : 'default';
-    }
-    if (tool !== 'crop') {
-      peCropDrag = null; peCropRect = null;
-      peOvCtx?.clearRect(0, 0, peOvCanvas?.width || 0, peOvCanvas?.height || 0);
-    }
-    if (tool !== 'adjustment' && tool !== 'filter') {
-      if (peCanvas) peCanvas.style.filter = '';
-      pePreviewFilter = '';
-    }
-  }
-
-  function peRenderToolPanel(tool) {
-    const panel = document.getElementById('pe-tool-panel');
-    if (!panel) return;
-
-    if (tool === 'crop') {
-      panel.innerHTML = `<span class="pe-hint">Drag on image to select crop area</span>
-        <button class="pe-btn-apply" id="pe-crop-apply" disabled>Apply Crop</button>
-        <button class="pe-btn-reset" id="pe-crop-reset">Reset</button>`;
-      document.getElementById('pe-crop-apply')?.addEventListener('click', peApplyCrop);
-      document.getElementById('pe-crop-reset')?.addEventListener('click', () => {
-        peCropDrag = null; peCropRect = null;
-        peOvCtx?.clearRect(0, 0, peOvCanvas?.width, peOvCanvas?.height);
-        const b = document.getElementById('pe-crop-apply'); if (b) b.disabled = true;
-      });
-
-    } else if (tool === 'adjustment') {
-      panel.innerHTML = `
-        <label class="pe-adj-label">Brightness <span id="pe-br-val">${peAdj.brightness}</span>%
-          <input type="range" id="pe-brightness"  min="0" max="200" value="${peAdj.brightness}"></label>
-        <label class="pe-adj-label">Contrast <span id="pe-cr-val">${peAdj.contrast}</span>%
-          <input type="range" id="pe-contrast"    min="0" max="200" value="${peAdj.contrast}"></label>
-        <label class="pe-adj-label">Saturation <span id="pe-sa-val">${peAdj.saturation}</span>%
-          <input type="range" id="pe-saturation"  min="0" max="200" value="${peAdj.saturation}"></label>
-        <button class="pe-btn-apply" id="pe-adj-apply">Apply</button>
-        <button class="pe-btn-reset" id="pe-adj-reset">Reset</button>`;
-      const valIds = { brightness: 'pe-br-val', contrast: 'pe-cr-val', saturation: 'pe-sa-val' };
-      ['brightness', 'contrast', 'saturation'].forEach(prop => {
-        document.getElementById('pe-' + prop)?.addEventListener('input', e => {
-          peAdj[prop] = parseInt(e.target.value);
-          const v = document.getElementById(valIds[prop]);
-          if (v) v.textContent = peAdj[prop];
-          const f = `brightness(${peAdj.brightness}%) contrast(${peAdj.contrast}%) saturate(${peAdj.saturation}%)`;
-          pePreviewFilter = f;
-          if (peCanvas) peCanvas.style.filter = f;
-        });
-      });
-      document.getElementById('pe-adj-apply')?.addEventListener('click', peApplyCurrentFilter);
-      document.getElementById('pe-adj-reset')?.addEventListener('click', () => {
-        peAdj = { brightness: 100, contrast: 100, saturation: 100 };
-        ['brightness','contrast','saturation'].forEach(p => { const el = document.getElementById('pe-' + p); if (el) el.value = '100'; });
-        const bv = document.getElementById('pe-br-val'), cv = document.getElementById('pe-cr-val'), sv = document.getElementById('pe-sa-val');
-        if (bv) bv.textContent = '100'; if (cv) cv.textContent = '100'; if (sv) sv.textContent = '100';
-        pePreviewFilter = '';
-        if (peCanvas) peCanvas.style.filter = '';
-      });
-
-    } else if (tool === 'filter') {
-      const presets = [
-        { name: 'Normal',  f: '' },
-        { name: 'B&W',     f: 'grayscale(1)' },
-        { name: 'Sepia',   f: 'sepia(0.8)' },
-        { name: 'Warm',    f: 'sepia(0.25) saturate(1.5) brightness(1.05)' },
-        { name: 'Cool',    f: 'hue-rotate(20deg) saturate(1.2) brightness(1.02)' },
-        { name: 'Vivid',   f: 'saturate(1.9) contrast(1.1)' },
-        { name: 'Fade',    f: 'contrast(0.82) brightness(1.1) saturate(0.85)' },
-        { name: 'Sharp',   f: 'contrast(1.25) brightness(0.97)' },
-      ];
-      panel.innerHTML = `<div class="pe-filter-list">${
-        presets.map(p => `<button class="pe-filter-btn${p.f === pePreviewFilter ? ' active' : ''}" data-filter="${esc(p.f)}">${esc(p.name)}</button>`).join('')
-      }</div>
-      <button class="pe-btn-apply" id="pe-filter-apply"${!pePreviewFilter ? ' disabled' : ''}>Apply Filter</button>`;
-      panel.querySelectorAll('.pe-filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          panel.querySelectorAll('.pe-filter-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          pePreviewFilter = btn.dataset.filter;
-          if (peCanvas) peCanvas.style.filter = pePreviewFilter;
-          const ab = document.getElementById('pe-filter-apply'); if (ab) ab.disabled = !pePreviewFilter;
-        });
-      });
-      document.getElementById('pe-filter-apply')?.addEventListener('click', peApplyCurrentFilter);
-
-    } else if (tool === 'markup') {
-      panel.innerHTML = `
-        <label class="pe-adj-label">Color <input type="color" id="pe-draw-color" value="${peDrawColor}"></label>
-        <label class="pe-adj-label">Size&nbsp;<input type="range" id="pe-draw-size" min="2" max="60" value="${peDrawSize}">
-          <span id="pe-size-val">${peDrawSize}</span>px</label>
-        <button class="pe-btn-reset" id="pe-markup-undo">Undo</button>`;
-      document.getElementById('pe-draw-color')?.addEventListener('input', e => peDrawColor = e.target.value);
-      document.getElementById('pe-draw-size')?.addEventListener('input', e => {
-        peDrawSize = parseInt(e.target.value);
-        const v = document.getElementById('pe-size-val'); if (v) v.textContent = peDrawSize;
-      });
-      document.getElementById('pe-markup-undo')?.addEventListener('click', peUndo);
-
-    } else if (tool === 'erase') {
-      panel.innerHTML = `
-        <label class="pe-adj-label">Eraser Size&nbsp;<input type="range" id="pe-erase-size" min="4" max="100" value="${peDrawSize}">
-          <span id="pe-erase-val">${peDrawSize}</span>px</label>
-        <button class="pe-btn-reset" id="pe-erase-undo">Undo</button>`;
-      document.getElementById('pe-erase-size')?.addEventListener('input', e => {
-        peDrawSize = parseInt(e.target.value);
-        const v = document.getElementById('pe-erase-val'); if (v) v.textContent = peDrawSize;
-      });
-      document.getElementById('pe-erase-undo')?.addEventListener('click', peUndo);
-
-    } else if (tool === 'background') {
-      panel.innerHTML = `<span class="pe-hint">Uses AI to remove the background</span>
-        <button class="pe-btn-apply" id="pe-bg-btn">Remove Background</button>`;
-      document.getElementById('pe-bg-btn')?.addEventListener('click', peRemoveBackground);
-    }
-  }
-
-  // ── Undo ─────────────────────────────────────────────────────
-  function pePushUndo() {
-    if (!peCtx || !peCanvas) return;
-    peUndoStack.push(peCtx.getImageData(0, 0, peCanvas.width, peCanvas.height));
-    if (peUndoStack.length > 20) peUndoStack.shift();
-  }
-  function peUndo() {
-    const state = peUndoStack.pop();
-    if (state && peCtx) peCtx.putImageData(state, 0, 0);
-  }
-
-  // ── Crop ─────────────────────────────────────────────────────
-  function peGetCropRect() {
-    if (!peCropDrag) return null;
-    const x = Math.min(peCropDrag.startX, peCropDrag.endX);
-    const y = Math.min(peCropDrag.startY, peCropDrag.endY);
-    const w = Math.abs(peCropDrag.endX - peCropDrag.startX);
-    const h = Math.abs(peCropDrag.endY - peCropDrag.startY);
-    return (w < 4 || h < 4) ? null : { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
-  }
-
-  function peDrawCropOverlay() {
-    if (!peOvCtx || !peOvCanvas) return;
-    peOvCtx.clearRect(0, 0, peOvCanvas.width, peOvCanvas.height);
-    const r = peGetCropRect(); if (!r) return;
-    peOvCtx.fillStyle = 'rgba(0,0,0,0.5)';
-    peOvCtx.fillRect(0, 0, peOvCanvas.width, peOvCanvas.height);
-    peOvCtx.clearRect(r.x, r.y, r.w, r.h);
-    peOvCtx.strokeStyle = '#ffc300'; peOvCtx.lineWidth = 2;
-    peOvCtx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-    peOvCtx.strokeStyle = 'rgba(255,195,0,0.3)'; peOvCtx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
-      peOvCtx.beginPath(); peOvCtx.moveTo(r.x + r.w * i / 3, r.y); peOvCtx.lineTo(r.x + r.w * i / 3, r.y + r.h); peOvCtx.stroke();
-      peOvCtx.beginPath(); peOvCtx.moveTo(r.x, r.y + r.h * i / 3); peOvCtx.lineTo(r.x + r.w, r.y + r.h * i / 3); peOvCtx.stroke();
-    }
-  }
-
-  function peApplyCrop() {
-    const r = peCropRect || peGetCropRect(); if (!r) return;
-    pePushUndo();
-    const data = peCtx.getImageData(r.x, r.y, r.w, r.h);
-    peCanvas.width  = r.w; peCanvas.height  = r.h;
-    peOvCanvas.width = r.w; peOvCanvas.height = r.h;
-    peCtx.putImageData(data, 0, 0);
-    peCropDrag = null; peCropRect = null;
-    peOvCtx?.clearRect(0, 0, r.w, r.h);
-    const b = document.getElementById('pe-crop-apply'); if (b) b.disabled = true;
-  }
-
-  // ── Filter / Adjustment apply ─────────────────────────────────
-  function peApplyCurrentFilter() {
-    if (!pePreviewFilter || !peCanvas || !peCtx) return;
-    pePushUndo();
-    const tmp = document.createElement('canvas');
-    tmp.width = peCanvas.width; tmp.height = peCanvas.height;
-    const tc = tmp.getContext('2d');
-    tc.filter = pePreviewFilter;
-    tc.drawImage(peCanvas, 0, 0);
-    peCtx.filter = 'none';
-    peCtx.clearRect(0, 0, peCanvas.width, peCanvas.height);
-    peCtx.drawImage(tmp, 0, 0);
-    peCanvas.style.filter = '';
-    pePreviewFilter = '';
-    peAdj = { brightness: 100, contrast: 100, saturation: 100 };
-    ['brightness','contrast','saturation'].forEach(p => { const el = document.getElementById('pe-' + p); if (el) el.value = '100'; });
-    ['pe-br-val','pe-cr-val','pe-sa-val'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '100'; });
-    panel_deselect_filter_btns();
-  }
-
-  function panel_deselect_filter_btns() {
-    document.querySelectorAll('#pe-tool-panel .pe-filter-btn').forEach(b => b.classList.remove('active'));
-    const ab = document.getElementById('pe-filter-apply'); if (ab) ab.disabled = true;
-  }
-
-  // ── Draw / Erase ──────────────────────────────────────────────
-  function peScreenToCanvas(e) {
-    const rect = peOvCanvas.getBoundingClientRect();
-    return {
-      x: Math.round((e.clientX - rect.left) * (peOvCanvas.width  / rect.width)),
-      y: Math.round((e.clientY - rect.top)  * (peOvCanvas.height / rect.height))
-    };
-  }
-
-  function peOvMouseDown(e) {
-    if (peTool === 'crop') {
-      const pt = peScreenToCanvas(e);
-      peCropDrag = { startX: pt.x, startY: pt.y, endX: pt.x, endY: pt.y };
-      const b = document.getElementById('pe-crop-apply'); if (b) b.disabled = true;
-    } else if (peTool === 'markup' || peTool === 'erase') {
-      pePushUndo();
-      peDrawing = true;
-      peLastPt  = peScreenToCanvas(e);
-      peStrokeDot(peLastPt);
-    }
-  }
-
-  function peOvMouseMove(e) {
-    if (peTool === 'crop' && peCropDrag) {
-      const pt = peScreenToCanvas(e);
-      peCropDrag.endX = pt.x; peCropDrag.endY = pt.y;
-      peDrawCropOverlay();
-      const r = peGetCropRect();
-      const b = document.getElementById('pe-crop-apply'); if (b) b.disabled = !r;
-    } else if ((peTool === 'markup' || peTool === 'erase') && peDrawing) {
-      const pt = peScreenToCanvas(e);
-      peStrokeLine(peLastPt, pt);
-      peLastPt = pt;
-    }
-  }
-
-  function peOvMouseUp(e) {
-    if (peTool === 'crop' && peCropDrag) {
-      const pt = peScreenToCanvas(e);
-      peCropDrag.endX = pt.x; peCropDrag.endY = pt.y;
-      peDrawCropOverlay();
-      peCropRect = peGetCropRect();
-      const b = document.getElementById('pe-crop-apply'); if (b) b.disabled = !peCropRect;
-    }
-    peDrawing = false; peLastPt = null;
-  }
-
-  function peStrokeDot(pt) {
-    peCtx.save();
-    peCtx.globalCompositeOperation = peTool === 'erase' ? 'destination-out' : 'source-over';
-    peCtx.fillStyle = peTool === 'erase' ? 'rgba(0,0,0,1)' : peDrawColor;
-    peCtx.beginPath(); peCtx.arc(pt.x, pt.y, peDrawSize / 2, 0, Math.PI * 2); peCtx.fill();
-    peCtx.restore();
-  }
-
-  function peStrokeLine(from, to) {
-    peCtx.save();
-    peCtx.globalCompositeOperation = peTool === 'erase' ? 'destination-out' : 'source-over';
-    peCtx.strokeStyle = peTool === 'erase' ? 'rgba(0,0,0,1)' : peDrawColor;
-    peCtx.lineWidth = peDrawSize; peCtx.lineCap = 'round'; peCtx.lineJoin = 'round';
-    peCtx.beginPath(); peCtx.moveTo(from.x, from.y); peCtx.lineTo(to.x, to.y); peCtx.stroke();
-    peCtx.restore();
-  }
-
-  // ── Background removal ────────────────────────────────────────
-  async function peRemoveBackground() {
-    const btn = document.getElementById('pe-bg-btn');
-    if (btn) { btn.textContent = 'Working…'; btn.disabled = true; }
-    try {
-      pePushUndo();
-      const dataUrl = peCanvas.toDataURL('image/png');
-      const base64  = dataUrl.split(',')[1];
-      const res  = await fetch('/api/photos/remove-bg', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64, mimeType: 'image/png' })
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Background removal failed');
-      const img = new Image();
-      img.onload = () => {
-        peCanvas.width  = img.naturalWidth;  peCanvas.height  = img.naturalHeight;
-        peOvCanvas.width = img.naturalWidth; peOvCanvas.height = img.naturalHeight;
-        peCtx.clearRect(0, 0, img.naturalWidth, img.naturalHeight);
-        peCtx.drawImage(img, 0, 0);
-      };
-      img.src = body.url;
-      addActivity('Background removed', `Picture ${peSlotIndex + 1} (editor)`);
-    } catch (err) {
-      alert('Background removal failed: ' + err.message);
-    } finally {
-      if (btn) { btn.textContent = 'Remove Background'; btn.disabled = false; }
-    }
+    // Clean up handler if user closes editor without saving
+    const poll = setInterval(() => {
+      if (win.closed) { clearInterval(poll); window.removeEventListener('message', readyHandler); }
+    }, 500);
   }
 
 })();
