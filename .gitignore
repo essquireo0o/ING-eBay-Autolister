@@ -34,6 +34,11 @@ dashboard_verify.png
 CUsers*.mjs
 installer-out/
 *.claude/
+# Session screenshots and reference files
+app_*.png
+feature_overview.png
+no_logo.png
+ingmining_homepage_reference.html
 
 # ── .NET ─────────────────────────────────────────────────────────
 *.pdb

@@ -208,9 +208,10 @@ public class ClaudeService(CredentialsStore creds)
 
         var response = await client.Messages.GetClaudeMessageAsync(new MessageParameters
         {
-            Model      = AnthropicModels.Claude46Sonnet,
-            MaxTokens  = 4096,
-            Messages   = messages
+            Model      = "claude-opus-4-8",
+            MaxTokens  = 8192,
+            Messages   = messages,
+            Thinking   = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.high }
         });
 
         var raw = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";
@@ -271,9 +272,10 @@ public class ClaudeService(CredentialsStore creds)
 
         var response = await BuildClient().Messages.GetClaudeMessageAsync(new MessageParameters
         {
-            Model = AnthropicModels.Claude46Sonnet,
-            MaxTokens = 4096,
-            Messages = messages
+            Model    = "claude-opus-4-8",
+            MaxTokens = 8192,
+            Messages  = messages,
+            Thinking  = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.high }
         });
 
         var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";
@@ -326,9 +328,10 @@ public class ClaudeService(CredentialsStore creds)
 
         var response = await BuildClient().Messages.GetClaudeMessageAsync(new MessageParameters
         {
-            Model = AnthropicModels.Claude46Sonnet,
-            MaxTokens = 4096,
-            Messages = messages
+            Model    = "claude-opus-4-8",
+            MaxTokens = 8192,
+            Messages  = messages,
+            Thinking  = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.high }
         });
 
         var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";

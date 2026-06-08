@@ -2173,8 +2173,8 @@ textarea {
 
 .nl-photo-slot:hover { border-color: var(--gold); }
 .nl-photo-slot.drag-over { border-color: var(--gold); background: rgba(255,195,0,0.06); }
-.nl-photo-slot.has-image { border-style: solid; border-color: var(--line); cursor: default; }
-.nl-photo-slot.has-image:hover { border-color: var(--line); }
+.nl-photo-slot.has-image { border-style: solid; border-color: var(--line); cursor: pointer; }
+.nl-photo-slot.has-image:hover { border-color: var(--gold); }
 
 .nl-photo-slot img {
   position: absolute;
@@ -2694,3 +2694,185 @@ textarea {
 .license-nag-inner strong { color: #c9a84c; }
 .license-nag-inner a { color: #7ec8e3; }
 .license-nag-inner .btn { flex-shrink: 0; }
+
+/* ── Photo Editor Modal ──────────────────────────────────────── */
+#photo-editor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  font-family: inherit;
+}
+#photo-editor-modal.hidden { display: none; }
+
+.pe-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  background: #1c1c1e;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.pe-tab {
+  padding: 5px 13px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color .1s, background .1s;
+}
+.pe-tab:hover { color: #ddd; background: #2a2a2a; }
+.pe-tab.active { color: #fff; background: #2c2c2e; border-color: #ffc300; }
+
+.pe-spacer { flex: 1; min-width: 8px; }
+
+.pe-btn-save {
+  background: #ffc300;
+  color: #111;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 18px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 13px;
+  margin-left: 4px;
+}
+.pe-btn-save:hover { background: #e6b000; }
+.pe-btn-save:disabled { opacity: .5; cursor: default; }
+
+.pe-btn-cancel {
+  background: #2c2c2e;
+  color: #aaa;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 13px;
+}
+.pe-btn-cancel:hover { color: #fff; }
+
+.pe-tool-panel {
+  padding: 8px 14px;
+  background: #1c1c1e;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pe-hint { color: #666; font-size: 12px; }
+
+.pe-btn-apply {
+  background: #ffc300;
+  color: #111;
+  border: none;
+  border-radius: 5px;
+  padding: 4px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pe-btn-apply:disabled { opacity: .35; cursor: default; }
+.pe-btn-apply:not(:disabled):hover { background: #e6b000; }
+
+.pe-btn-reset {
+  background: #2c2c2e;
+  color: #aaa;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  padding: 4px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pe-btn-reset:hover { color: #fff; }
+
+.pe-adj-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #bbb;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pe-adj-label input[type=range] { width: 90px; cursor: pointer; accent-color: #ffc300; }
+.pe-adj-label input[type=color] {
+  width: 28px; height: 22px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 1px;
+  background: none;
+}
+
+.pe-filter-list { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.pe-filter-btn {
+  padding: 4px 12px;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  background: #2c2c2e;
+  color: #bbb;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pe-filter-btn:hover { color: #fff; border-color: #555; }
+.pe-filter-btn.active { color: #111; background: #ffc300; border-color: #ffc300; }
+
+.pe-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #0d0d0d;
+  padding: 16px;
+}
+
+.pe-canvas-wrap {
+  position: relative;
+  display: inline-flex;
+  line-height: 0;
+}
+
+#pe-canvas {
+  display: block;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 220px);
+  width: auto;
+  height: auto;
+  box-shadow: 0 4px 32px rgba(0,0,0,.6);
+  /* checkerboard pattern to show transparent areas */
+  background-color: #252525;
+  background-image:
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
+    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+#pe-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}

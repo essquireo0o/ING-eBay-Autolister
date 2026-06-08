@@ -20,6 +20,7 @@ builder.Services.AddSingleton<ActionLog>();
 builder.Services.AddSingleton<DraftStore>();
 builder.Services.AddSingleton<LicenseService>();
 builder.Services.AddSingleton<StripeService>();
+builder.Services.AddSingleton<AnalyticsStore>();
 
 var app = builder.Build();
 
@@ -330,10 +331,53 @@ static async Task<(string Screenshot, string? ProductImage)> TakeHeadlessScreens
         "  try {\n" +
         $"    await page.goto('{escapedUrl}', {{ waitUntil: 'domcontentloaded', timeout: 25000 }});\n" +
         "    await page.waitForTimeout(2500);\n" +
-        "    for (const sel of ['button:has-text(\"Continue shopping\")','input[value*=\"Continue\"]','#continueShopping']) {\n" +
+        "    for (const sel of ['button:has-text(\"Continue shopping\")','input[value*=\"Continue\"]','#continueShopping',\n" +
+        "        'button[aria-label*=\"close\" i]','button[aria-label*=\"dismiss\" i]','button[aria-label*=\"accept\" i]',\n" +
+        "        '[class*=\"modal-close\"]','[class*=\"popup-close\"]','[class*=\"close-modal\"]',\n" +
+        "        'button:has-text(\"Accept all\")','button:has-text(\"Accept cookies\")','button:has-text(\"Got it\")','button:has-text(\"I agree\")']) {\n" +
         "      const btn = await page.$(sel).catch(()=>null);\n" +
-        "      if (btn) { await btn.click(); await page.waitForTimeout(3000); break; }\n" +
+        "      if (btn) { try { await btn.click(); await page.waitForTimeout(500); } catch(_) {} }\n" +
         "    }\n" +
+        // Strip watermarks, cookie banners, consent overlays, and popups via CSS injection
+        "    await page.addStyleTag({ content: [\n" +
+        "      '[class*=\"watermark\" i],[id*=\"watermark\" i],[class*=\"water-mark\" i],[id*=\"water-mark\" i],',\n" +
+        "      '.WatermarkContainer,[class*=\"WatermarkImage\"],[class*=\"wm-overlay\"],[class*=\"img-protection\"],',\n" +
+        "      '[class*=\"cookie-banner\" i],[class*=\"cookie-bar\" i],[class*=\"cookie-notice\" i],[class*=\"cookie-wall\" i],',\n" +
+        "      '[id*=\"cookie-banner\" i],[id*=\"cookie-bar\" i],[id*=\"cookie-notice\" i],',\n" +
+        "      '[class*=\"consent-banner\" i],[class*=\"gdpr-banner\" i],[class*=\"gdpr-notice\" i],',\n" +
+        "      '#onetrust-banner-sdk,#onetrust-consent-sdk,[class*=\"CookieBanner\"],[class*=\"cookieBanner\"],',\n" +
+        "      '.cc-window,.cc-banner,[class*=\"CybotCookiebot\"],[id*=\"CybotCookiebot\"],',\n" +
+        "      '.ReactModal__Overlay,.modal-backdrop,[class*=\"modal-overlay\" i],[class*=\"popup-overlay\" i],',\n" +
+        "      '[class*=\"interstitial\" i],[class*=\"newsletter-popup\" i],[class*=\"email-popup\" i]',\n" +
+        "      '{display:none!important;opacity:0!important;pointer-events:none!important}'\n" +
+        "    ].join('') }).catch(()=>{});\n" +
+        // JS pass: remove absolutely/fixed-positioned text overlays on top of product images
+        // (seller brand names, company logos overlaid as HTML elements over the image)
+        "    await page.evaluate(() => {\n" +
+        "      try {\n" +
+        "        const imgs = Array.from(document.querySelectorAll('img'))\n" +
+        "          .filter(img => img.naturalWidth >= 200 && img.naturalHeight >= 200);\n" +
+        "        for (const img of imgs) {\n" +
+        "          const imgRect = img.getBoundingClientRect();\n" +
+        "          if (!imgRect.width || !imgRect.height) continue;\n" +
+        "          const container = img.closest('[class*=\"product\"],[class*=\"gallery\"],[class*=\"image-wrap\"],[class*=\"img-wrap\"],[class*=\"photo\"]') || img.parentElement;\n" +
+        "          if (!container) continue;\n" +
+        "          const candidates = container.querySelectorAll('*');\n" +
+        "          for (const el of candidates) {\n" +
+        "            if (el === img || el.tagName === 'IMG' || el.querySelector('img')) continue;\n" +
+        "            const st = window.getComputedStyle(el);\n" +
+        "            if (st.position !== 'absolute' && st.position !== 'fixed') continue;\n" +
+        "            const text = el.textContent.trim();\n" +
+        "            if (!text || text.length > 80) continue;\n" +
+        "            const r = el.getBoundingClientRect();\n" +
+        "            const overlaps = r.left < imgRect.right && r.right > imgRect.left &&\n" +
+        "                             r.top  < imgRect.bottom && r.bottom > imgRect.top;\n" +
+        "            if (overlaps) el.style.setProperty('display','none','important');\n" +
+        "          }\n" +
+        "        }\n" +
+        "      } catch(_) {}\n" +
+        "    }).catch(()=>{});\n" +
+        "    await page.waitForTimeout(400);\n" +
         "    const buf = await page.screenshot({ fullPage: false });\n" +
         "    let prodUrl = null;\n" +
         "    try {\n" +
@@ -1025,6 +1069,105 @@ app.MapPost("/api/listing/update", async (UpdateListingRequest req, EbayService 
     await ebay.UpdateListingAsync(req);
     log.Add("Info", "eBay listing revised", string.IsNullOrWhiteSpace(req.Sku) ? req.OfferId : req.Sku);
     return Results.Ok();
+});
+
+// ── Owner dashboard ───────────────────────────────────────────────
+app.MapGet("/api/owner/stats", (string? k, CredentialsStore store, AnalyticsStore analytics, ActionLog log) =>
+{
+    var adminKey = store.EnsureAdminKey();
+    if (string.IsNullOrWhiteSpace(k) || k != adminKey)
+        return Results.Unauthorized();
+    var snap = analytics.GetSnapshot();
+    return Results.Ok(new
+    {
+        analytics = snap,
+        recentLogs = log.Recent()
+    });
+});
+
+app.MapGet("/owner", (string? k, CredentialsStore store) =>
+{
+    var adminKey = store.EnsureAdminKey();
+    if (string.IsNullOrWhiteSpace(k) || k != adminKey)
+        return Results.Content("<html><body><h2>401 Unauthorized</h2></body></html>", "text/html", statusCode: 401);
+
+    var html = $$"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Owner Dashboard — ING Listing Engine</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh;padding:2rem}
+  h1{font-size:1.5rem;font-weight:700;margin-bottom:1.5rem;color:#f8fafc}
+  h2{font-size:1rem;font-weight:600;margin-bottom:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;margin-bottom:2rem}
+  .card{background:#1e2330;border:1px solid #2d3748;border-radius:10px;padding:1.25rem}
+  .card-val{font-size:2rem;font-weight:700;color:#60a5fa}
+  .card-lbl{font-size:.75rem;color:#64748b;margin-top:.25rem}
+  table{width:100%;border-collapse:collapse;background:#1e2330;border-radius:10px;overflow:hidden;margin-bottom:2rem}
+  th{background:#2d3748;padding:.6rem 1rem;text-align:left;font-size:.75rem;color:#94a3b8;text-transform:uppercase}
+  td{padding:.6rem 1rem;border-top:1px solid #2d3748;font-size:.85rem}
+  .log-warn{color:#f59e0b}.log-info{color:#94a3b8}
+  .badge{display:inline-block;padding:.2rem .5rem;border-radius:4px;font-size:.7rem;font-weight:600}
+  .badge-warn{background:#78350f;color:#fcd34d}.badge-info{background:#1e3a5f;color:#93c5fd}
+  #status{color:#94a3b8;font-size:.85rem;margin-bottom:1rem}
+  .refresh-btn{background:#2563eb;color:#fff;border:none;border-radius:6px;padding:.5rem 1rem;cursor:pointer;font-size:.85rem}
+  .refresh-btn:hover{background:#1d4ed8}
+</style>
+</head>
+<body>
+<h1>Owner Dashboard</h1>
+<div id="status">Loading…</div>
+<button class="refresh-btn" onclick="load()">Refresh</button>
+<div id="root"></div>
+<script>
+const KEY = new URLSearchParams(location.search).get('k');
+async function load() {
+  document.getElementById('status').textContent = 'Loading…';
+  const res = await fetch('/api/owner/stats?k=' + encodeURIComponent(KEY));
+  if (!res.ok) { document.getElementById('status').textContent = 'Error ' + res.status; return; }
+  const d = await res.json();
+  const a = d.analytics;
+  document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+  const stats = [
+    { val: a.totalPageLoads, lbl: 'Page Loads' },
+    { val: (a.uniqueIps||[]).length, lbl: 'Unique IPs' },
+    { val: a.aiAnalyses, lbl: 'AI Analyses' },
+    { val: a.bulkImports, lbl: 'Bulk Imports' },
+    { val: a.listingsPublished, lbl: 'Published' },
+    { val: a.draftsSaved, lbl: 'Drafts Saved' },
+  ];
+  let html = '<div class="grid">' + stats.map(s =>
+    `<div class="card"><div class="card-val">${s.val??0}</div><div class="card-lbl">${s.lbl}</div></div>`
+  ).join('') + '</div>';
+  if (a.firstSeen) html += `<p style="color:#64748b;font-size:.8rem;margin-bottom:2rem">First seen: ${new Date(a.firstSeen).toLocaleString()} &nbsp;|&nbsp; Last seen: ${new Date(a.lastSeen).toLocaleString()}</p>`;
+  if ((a.daily||[]).length) {
+    html += '<h2>Daily (last 30 days)</h2><table><thead><tr><th>Date</th><th>Page Loads</th><th>Unique IPs</th><th>AI Analyses</th><th>Bulk Imports</th><th>Published</th></tr></thead><tbody>';
+    [...a.daily].reverse().forEach(r => {
+      html += `<tr><td>${r.date}</td><td>${r.pageLoads}</td><td>${r.uniqueIps}</td><td>${r.aiAnalyses}</td><td>${r.bulkImports}</td><td>${r.listingsPublished}</td></tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  if ((d.recentLogs||[]).length) {
+    html += '<h2>Recent Logs</h2><table><thead><tr><th>Time</th><th>Level</th><th>Action</th><th>Detail</th></tr></thead><tbody>';
+    d.recentLogs.forEach(l => {
+      const cls = l.level==='Warning'?'badge-warn':'badge-info';
+      html += `<tr><td>${new Date(l.timestamp).toLocaleTimeString()}</td><td><span class="badge ${cls}">${l.level}</span></td><td>${esc(l.title)}</td><td style="color:#64748b">${esc(l.detail)}</td></tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  document.getElementById('root').innerHTML = html;
+}
+function esc(s){const d=document.createElement('div');d.textContent=s??'';return d.innerHTML;}
+load();
+</script>
+</body>
+</html>
+""";
+    return Results.Content(html, "text/html");
 });
 
 app.Run();
