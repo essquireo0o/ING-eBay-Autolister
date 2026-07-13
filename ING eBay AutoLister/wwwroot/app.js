@@ -24,6 +24,7 @@
     bindSetup();
     bindNewListingModal();
     bindImageGenSetup();
+    bindSniper();
     bindPgImggen();
     bindForm();
     restoreListingViewMode();
@@ -47,6 +48,9 @@
 
     renderListings();
     updateStats();
+
+    // Navigate to whatever section the URL hash specifies (supports reload + deep links)
+    if (location.hash) handleNav(location.hash.slice(1));
   }
 
   function bindDashboard() {
@@ -64,12 +68,17 @@
     on('btn-table-view', 'click', () => setViewMode('table'));
 
     document.querySelectorAll('.nav-item').forEach(btn => {
-      btn.addEventListener('click', () => handleNav(btn.dataset.page || 'dashboard'));
+      btn.addEventListener('click', () => { location.hash = btn.dataset.page || 'dashboard'; });
+    });
+
+    window.addEventListener('hashchange', () => {
+      handleNav(location.hash.slice(1) || 'dashboard');
     });
   }
 
   function handleNav(page) {
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === page));
+    if (page !== 'ai') $('new-listing-overlay')?.classList.add('hidden');
     if (page === 'ai') {
       showAiSection();
       return;
@@ -86,6 +95,10 @@
       showLicenseSection();
       return;
     }
+    if (page === 'sniper') {
+      showSniperSection();
+      return;
+    }
     showDashboard();
     if (page === 'listings') $('listings-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (page === 'activity') $('activity-list')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -95,16 +108,78 @@
     openNewListingModal();
   }
 
+  const OVERLAY_SECTIONS = ['settings-section', 'logs-section', 'license-section', 'sniper-section'];
+
+  function hideOverlaySections() {
+    OVERLAY_SECTIONS.forEach(id => $(id)?.classList.add('hidden'));
+  }
+
   function showDashboard() {
+    hideOverlaySections();
     $('dashboard-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'dashboard'));
   }
 
   async function showSettingsSection() {
+    hideOverlaySections();
     $('settings-section')?.classList.remove('hidden');
     $('settings-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'settings'));
     await loadSettingsStatus();
+    await loadTerapeakStatus();
+  }
+
+  async function loadTerapeakStatus() {
+    const statusEl       = $('pg-terapeak-status');
+    const connectBtn     = $('pg-terapeak-connect');
+    const disconnectBtn  = $('pg-terapeak-disconnect');
+    if (!statusEl || !connectBtn || !disconnectBtn) return;
+
+    try {
+      const data = await fetch('/api/terapeak/status').then(r => r.json());
+      if (data.loginInProgress) {
+        statusEl.textContent = 'Browser window open — log into eBay there, then come back here.';
+        connectBtn.disabled = true;
+        disconnectBtn.classList.add('hidden');
+      } else if (data.connected) {
+        statusEl.textContent = 'Connected — Auto-Fill will pull real sold-comp data from Terapeak.';
+        connectBtn.classList.add('hidden');
+        disconnectBtn.classList.remove('hidden');
+      } else {
+        statusEl.textContent = 'Not connected — sold comps will show links only.';
+        connectBtn.classList.remove('hidden');
+        connectBtn.disabled = false;
+        disconnectBtn.classList.add('hidden');
+      }
+    } catch (err) {
+      statusEl.textContent = `Unable to check Terapeak status: ${err.message}`;
+    }
+  }
+
+  async function terapeakConnect() {
+    const btn = $('pg-terapeak-connect');
+    const statusEl = $('pg-terapeak-status');
+    try {
+      btn.disabled = true;
+      const data = await fetch('/api/terapeak/connect', { method: 'POST' }).then(r => r.json());
+      if (statusEl) statusEl.textContent = data.message || 'Opening browser…';
+      // Poll status every few seconds until the login window closes (saved or cancelled)
+      const poll = setInterval(async () => {
+        const s = await fetch('/api/terapeak/status').then(r => r.json()).catch(() => null);
+        if (s && !s.loginInProgress) {
+          clearInterval(poll);
+          await loadTerapeakStatus();
+        }
+      }, 3000);
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Connect failed: ${err.message}`;
+      btn.disabled = false;
+    }
+  }
+
+  async function terapeakDisconnect() {
+    await fetch('/api/terapeak/disconnect', { method: 'POST' }).catch(() => {});
+    await loadTerapeakStatus();
   }
 
   async function openSetupWithPolicies(status) {
@@ -113,6 +188,7 @@
   }
 
   async function showLogsSection() {
+    hideOverlaySections();
     $('logs-section')?.classList.remove('hidden');
     $('logs-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'logs'));
@@ -120,11 +196,160 @@
   }
 
   async function showLicenseSection() {
+    hideOverlaySections();
     $('license-section')?.classList.remove('hidden');
     $('license-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'license'));
     const status = await fetch('/api/license/status').then(r => r.json()).catch(() => null);
     if (status) updateLicenseUI(status);
+  }
+
+  // ── eBay Sniper ───────────────────────────────────────────────────────────
+  let sniperAuctions = JSON.parse(localStorage.getItem('sniperAuctions') || '[]');
+  let sniperTimers   = {};
+
+  function showSniperSection() {
+    hideOverlaySections();
+    $('sniper-section')?.classList.remove('hidden');
+    $('sniper-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'sniper'));
+    renderSniper();
+    sniperAuctions.forEach(a => scheduleSniperBid(a));
+  }
+
+  function saveSniperAuctions() {
+    localStorage.setItem('sniperAuctions', JSON.stringify(sniperAuctions));
+  }
+
+  function renderSniper() {
+    const tbody  = $('sniper-tbody');
+    const empty  = $('sniper-empty');
+    const table  = $('sniper-table');
+    if (!tbody) return;
+    if (!sniperAuctions.length) {
+      empty?.classList.remove('hidden');
+      table?.classList.add('hidden');
+      return;
+    }
+    empty?.classList.add('hidden');
+    table?.classList.remove('hidden');
+    tbody.innerHTML = sniperAuctions.map((a, i) => {
+      const endsMs   = a.endsAt ? new Date(a.endsAt).getTime() : null;
+      const now      = Date.now();
+      const secsLeft = endsMs ? Math.floor((endsMs - now) / 1000) : null;
+      const timeStr  = endsMs
+        ? (secsLeft > 0 ? formatCountdown(secsLeft) : 'Ended')
+        : 'Unknown';
+      const statusBadge = a.status === 'won'    ? '<span style="color:#4ade80;font-weight:700">✓ Won</span>'
+                        : a.status === 'bid_placed' ? '<span style="color:#60a5fa">Bid placed</span>'
+                        : a.status === 'sniped' ? '<span style="color:#60a5fa">Sniped</span>'
+                        : a.status === 'lost'   ? '<span style="color:#f87171">Lost</span>'
+                        : secsLeft !== null && secsLeft <= 30 ? '<span style="color:#fbbf24;font-weight:700">⚡ Firing soon</span>'
+                        : '<span style="color:#94a3b8">Watching</span>';
+      return `<tr style="border-bottom:1px solid #1e2330;font-size:13px">
+        <td style="padding:12px;max-width:260px">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.title || a.itemId)}</div>
+          <a href="https://www.ebay.com/itm/${esc(a.itemId)}" target="_blank" style="font-size:11px;color:#60a5fa">Item #${esc(a.itemId)}</a>
+        </td>
+        <td style="padding:12px;white-space:nowrap;color:${secsLeft !== null && secsLeft < 120 ? '#fbbf24' : '#94a3b8'}">${timeStr}</td>
+        <td style="padding:12px;text-align:right;color:#e2e8f0">${a.currentBid ? '$' + a.currentBid.toFixed(2) : '—'}</td>
+        <td style="padding:12px;text-align:right;color:#4ade80;font-weight:600">$${parseFloat(a.maxBid).toFixed(2)}</td>
+        <td style="padding:12px;text-align:center">${statusBadge}</td>
+        <td style="padding:12px;text-align:center">
+          <button onclick="removeSnipe(${i})" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:16px" title="Remove">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // refresh table every second for live countdown
+    clearTimeout(sniperRenderTimer);
+    sniperRenderTimer = setTimeout(renderSniper, 1000);
+  }
+
+  let sniperRenderTimer = null;
+
+  function formatCountdown(secs) {
+    if (secs > 86400) return Math.floor(secs / 86400) + 'd ' + Math.floor((secs % 86400) / 3600) + 'h';
+    if (secs > 3600)  return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
+    if (secs > 60)    return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+    return secs + 's';
+  }
+
+  window.removeSnipe = function(i) {
+    clearTimeout(sniperTimers[sniperAuctions[i]?.itemId]);
+    sniperAuctions.splice(i, 1);
+    saveSniperAuctions();
+    renderSniper();
+  };
+
+  async function addSnipe() {
+    const rawUrl = $('sniper-url-input')?.value.trim();
+    const maxBid = parseFloat($('sniper-bid-input')?.value);
+    if (!rawUrl)      { alert('Paste an eBay auction URL or item ID.'); return; }
+    if (!maxBid || maxBid <= 0) { alert('Enter a valid max bid amount.'); return; }
+
+    const m = rawUrl.match(/(\d{10,13})/);
+    const itemId = m ? m[1] : rawUrl.replace(/\D/g, '');
+    if (!itemId) { alert('Could not find an item ID in that URL.'); return; }
+
+    const btn = $('btn-sniper-submit');
+    if (btn) { btn.disabled = true; btn.textContent = 'Looking up…'; }
+
+    let title = '', endsAt = null, currentBid = null;
+    try {
+      const res = await fetch(`/api/sniper/lookup?itemId=${itemId}`);
+      if (res.ok) {
+        const d = await res.json();
+        title      = d.title      || '';
+        endsAt     = d.endsAt     || null;
+        currentBid = d.currentBid || null;
+      }
+    } catch { /* non-fatal — add anyway */ }
+
+    const auction = { itemId, title, maxBid, endsAt, currentBid, status: 'watching', addedAt: new Date().toISOString() };
+    sniperAuctions.push(auction);
+    saveSniperAuctions();
+    scheduleSniperBid(auction);
+
+    if ($('sniper-url-input')) $('sniper-url-input').value = '';
+    if ($('sniper-bid-input')) $('sniper-bid-input').value = '';
+    if (btn) { btn.disabled = false; btn.textContent = 'Track It'; }
+    $('sniper-add-form')?.classList.add('hidden');
+    renderSniper();
+  }
+
+  function scheduleSniperBid(auction) {
+    if (!auction.endsAt || auction.status === 'bid_placed' || auction.status === 'won' || auction.status === 'lost') return;
+    const endsMs    = new Date(auction.endsAt).getTime();
+    const fireAt    = endsMs - 8000; // 8 seconds before end
+    const delay     = fireAt - Date.now();
+    if (delay < 0) return;
+
+    clearTimeout(sniperTimers[auction.itemId]);
+    sniperTimers[auction.itemId] = setTimeout(async () => {
+      const idx = sniperAuctions.findIndex(a => a.itemId === auction.itemId);
+      if (idx < 0) return;
+      try {
+        const res = await fetch('/api/sniper/bid', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId: auction.itemId, maxBid: auction.maxBid })
+        });
+        const d = res.ok ? await res.json() : { ok: false };
+        sniperAuctions[idx].status = d.ok ? 'bid_placed' : 'lost';
+        addActivity('Sniper fired', `Item #${auction.itemId} — ${d.ok ? 'bid placed $' + auction.maxBid.toFixed(2) : 'bid failed'}`);
+      } catch {
+        sniperAuctions[idx].status = 'lost';
+      }
+      saveSniperAuctions();
+      renderSniper();
+    }, delay);
+  }
+
+  function bindSniper() {
+    on('btn-sniper-add',    'click', () => $('sniper-add-form')?.classList.toggle('hidden'));
+    on('btn-sniper-cancel', 'click', () => $('sniper-add-form')?.classList.add('hidden'));
+    on('btn-sniper-submit', 'click', addSnipe);
   }
 
   async function activateLicensePage() {
@@ -278,11 +503,27 @@
   }
 
   async function checkSetupOnLoad() {
+    // If returning from the eBay OAuth server relay, show connected state
+    const params = new URLSearchParams(location.search);
+    if (params.get('ebay_connected') === '1') {
+      history.replaceState({}, '', '/');
+      updateAuthUI(true);
+      addActivity('eBay connected', 'OAuth login completed successfully.');
+      showResult('ok', '✓ Connected to eBay successfully!');
+    } else if (params.get('ebay_error')) {
+      history.replaceState({}, '', '/');
+      showResult('error', `eBay login failed: ${params.get('ebay_error')}`);
+    }
+
     try {
       const status = await fetch('/api/setup/status').then(r => r.json());
-      populateSetupFields(status);
+      await populateSetupFields(status);
+      updateSetupChecklist(!!status.hasAnthropicKey, isConnected, !!status.hasOpenAiKey);
       if (!status.isComplete) {
-        addActivity('Credentials needed', 'Open Settings to finish eBay and AI configuration.');
+        addActivity('Credentials needed', 'Open Settings to finish configuration.');
+      }
+      if (!status.hasAnthropicKey) {
+        openSetup(null);
       }
     } catch {
       addActivity('Setup status unavailable', 'Could not read local credential status.');
@@ -319,6 +560,26 @@
       setModelSelect('pg-imggen-model', f.localSdModelName || '');
       $('s-client-secret').placeholder = f.hasEbayClientSecret ? '(saved - leave blank to keep)' : 'PRD-abc123...';
       $('s-user-token').placeholder = f.hasEbayUserToken ? '(saved - leave blank to keep)' : 'AgAAAA...';
+      // eBay developer section hides when eBay app creds are pre-configured.
+      // AI provider section stays visible until the user has their own Anthropic key.
+      const ebayPreconfigured = f.hasEbayClientId && f.hasEbayClientSecret;
+      const fullyPreconfigured = f.hasAnthropicKey && ebayPreconfigured;
+      document.getElementById('setup-ai-provider')?.classList.toggle('hidden', fullyPreconfigured);
+      document.getElementById('setup-ebay-developer')?.classList.toggle('hidden', ebayPreconfigured);
+      $('btn-paste-token')?.classList.toggle('hidden', ebayPreconfigured);
+      const notice = document.getElementById('setup-preconfigured-notice');
+      const modalDesc = document.getElementById('setup-modal-desc');
+      if (fullyPreconfigured) {
+        notice?.classList.remove('hidden');
+        if (notice) notice.innerHTML = '<strong>✓ All credentials configured.</strong> Click <strong>Save and Connect eBay</strong> below to link your eBay account.';
+        if (modalDesc) modalDesc.textContent = 'All credentials are configured. Connect your eBay account to get started.';
+      } else if (ebayPreconfigured) {
+        notice?.classList.remove('hidden');
+        if (notice) notice.innerHTML = '<strong>✓ eBay is pre-configured.</strong> Enter your Anthropic API key above to enable AI listing analysis (<a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#0369a1">get one at console.anthropic.com</a>), then click Save and Connect eBay.';
+        if (modalDesc) modalDesc.textContent = 'Enter your Anthropic API key, then connect your eBay account to get started.';
+      } else {
+        notice?.classList.add('hidden');
+      }
       // Listing defaults — Settings page
       setVal('pg-default-zip',          f.defaultPostalCode      || '');
       setVal('pg-default-country',      f.defaultCountry         || 'US');
@@ -379,7 +640,7 @@
       const msg   = $('token-msg');
       if (!token) { if (msg) { msg.textContent = 'Paste a token first.'; msg.style.color = 'var(--danger)'; } return; }
 
-      // Detect OAuth redirect URL (contains a code= parameter from ingmining.com)
+      // Detect OAuth redirect URL (contains a code= parameter from inglisting.com)
       // and route to the exchange endpoint instead of saving the raw URL as a token
       const isOAuthRedirect = token.startsWith('https://') && token.includes('code=');
       if (isOAuthRedirect) {
@@ -431,6 +692,7 @@
 
     on('s-oauth-redirect-url', 'input', previewOAuthRedirectUrl);
     on('btn-exchange-oauth-redirect', 'click', exchangeOAuthRedirectUrl);
+    on('btn-paste-and-connect', 'click', pasteAndConnect);
     on('btn-settings', 'click', () => openSetupWithPolicies(null));
     on('btn-open-credentials', 'click', () => openSetupWithPolicies(null));
     on('btn-activate-license', 'click', activateLicense);
@@ -445,8 +707,10 @@
     on('btn-connect', 'click', async () => {
       try {
         const status = await fetch('/api/setup/status').then(r => r.json());
-        if (!status.isComplete) {
+        const hasEbayCreds = status.hasEbayClientId && status.hasEbayClientSecret;
+        if (!hasEbayCreds) {
           openSetup(status);
+          showResult('error', 'Add your eBay Client ID and Client Secret in Settings first.');
           return;
         }
         const res = await fetch('/api/ebay/auth-url');
@@ -455,7 +719,7 @@
         window.location.href = url;
       } catch (err) {
         openSetup(null);
-        showResult('error', `eBay connection setup needed: ${esc(err.message)}`);
+        showResult('error', `eBay login failed: ${esc(err.message)}`);
       }
     });
 
@@ -561,9 +825,9 @@
       if (!res.ok) throw new Error(await res.text());
       const status = await res.json();
 
-      if (!status.isComplete) {
+      const hasEbayCreds = status.hasEbayClientId && status.hasEbayClientSecret;
+      if (!hasEbayCreds) {
         const missing = [];
-        if (!status.hasAnthropicKey) missing.push('AI API Key');
         if (!status.hasEbayClientId) missing.push('eBay Client ID');
         if (!status.hasEbayClientSecret) missing.push('eBay Client Secret');
         if (status.ebaySandbox && !status.hasEbayRuName) missing.push('eBay RuName');
@@ -797,6 +1061,58 @@
         btn.textContent = 'Exchange Production OAuth URL';
       }
     }
+  }
+
+  let ebayCallbackWatcherActive = false;
+
+  async function pasteAndConnect() {
+    const msg = $('oauth-redirect-msg');
+    const btn = $('btn-paste-and-connect');
+    if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+    try {
+      let text = '';
+      try { text = await navigator.clipboard.readText(); } catch { /* permission denied */ }
+      if (!text || !text.includes('code=')) {
+        text = $('s-oauth-redirect-url')?.value.trim() || '';
+      }
+      if (!text || !text.includes('code=')) {
+        if (msg) { msg.textContent = 'No eBay code found. Make sure you copied the URL from your browser after logging in.'; msg.className = 'error'; }
+        return;
+      }
+      const ta = $('s-oauth-redirect-url');
+      if (ta) ta.value = text;
+      await exchangeOAuthRedirectUrl();
+      ebayCallbackWatcherActive = false;
+      $('ebay-oauth-step')?.classList.add('hidden');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📋 I\'ve Logged In — Paste & Connect'; }
+    }
+  }
+
+  function startEbayCallbackWatcher() {
+    if (ebayCallbackWatcherActive) return;
+    ebayCallbackWatcherActive = true;
+
+    async function tryAutoConnect() {
+      if (!ebayCallbackWatcherActive) return;
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && text.includes('code=') && text.includes('state=')) {
+          ebayCallbackWatcherActive = false;
+          document.removeEventListener('visibilitychange', onVisible);
+          const ta = $('s-oauth-redirect-url');
+          if (ta) ta.value = text;
+          await exchangeOAuthRedirectUrl();
+          $('ebay-oauth-step')?.classList.add('hidden');
+        }
+      } catch { /* clipboard permission denied — user clicks the button manually */ }
+    }
+
+    function onVisible() {
+      if (document.visibilityState === 'visible') tryAutoConnect();
+    }
+
+    document.addEventListener('visibilitychange', onVisible);
   }
 
   function parseOAuthRedirectUrl(raw) {
@@ -1084,19 +1400,54 @@
   function updateAuthUI(connected) {
     isConnected = connected;
     if (connected) {
-      setText('auth-status', 'Connected to eBay');
-      $('auth-status')?.classList.remove('badge-off');
-      $('auth-status')?.classList.add('badge-on');
-      $('btn-paste-token')?.classList.add('hidden');
+      $('auth-status')?.classList.remove('hidden');
       $('btn-connect')?.classList.add('hidden');
       $('btn-disconnect')?.classList.remove('hidden');
     } else {
-      setText('auth-status', 'Not connected to eBay');
-      $('auth-status')?.classList.remove('badge-on');
-      $('auth-status')?.classList.add('badge-off');
-      $('btn-paste-token')?.classList.remove('hidden');
+      $('auth-status')?.classList.add('hidden');
       $('btn-connect')?.classList.remove('hidden');
       $('btn-disconnect')?.classList.add('hidden');
+    }
+    updateSetupChecklist(null, connected, null);
+  }
+
+  function updateSetupChecklist(hasAiKey, hasEbay, hasOpenAi) {
+    const checklist = $('setup-checklist');
+    if (!checklist) return;
+
+    const step1Done = hasAiKey  !== null && hasAiKey  !== undefined ? hasAiKey  : false;
+    const step2Done = hasEbay   !== null && hasEbay   !== undefined ? hasEbay   : isConnected;
+    const step3Done = hasOpenAi !== null && hasOpenAi !== undefined ? hasOpenAi : false;
+
+    // Step 1 — Anthropic key
+    const icon1 = $('step1-icon');
+    const btn1  = $('step1-btn');
+    if (step1Done) {
+      if (icon1) { icon1.textContent = '✓'; icon1.style.background = '#166534'; icon1.style.color = '#4ade80'; }
+      if (btn1)  { btn1.textContent = '✓ Key saved'; btn1.disabled = true; btn1.style.opacity = '.5'; }
+    }
+
+    // Step 2 — eBay
+    const icon2 = $('step2-icon');
+    const btn2  = $('step2-btn');
+    if (step2Done) {
+      if (icon2) { icon2.textContent = '✓'; icon2.style.background = '#166534'; icon2.style.color = '#4ade80'; }
+      if (btn2)  { btn2.textContent = '✓ Connected'; btn2.disabled = true; btn2.style.opacity = '.5'; }
+    }
+
+    // Step 3 — OpenAI (optional, just show checkmark if present)
+    const icon3 = $('step3-icon');
+    const btn3  = $('step3-btn');
+    if (step3Done) {
+      if (icon3) { icon3.textContent = '✓'; icon3.style.background = '#166534'; icon3.style.color = '#4ade80'; }
+      if (btn3)  { btn3.textContent = '✓ Key saved'; btn3.disabled = true; btn3.style.opacity = '.5'; }
+    }
+
+    // Hide checklist once the two required steps are done (step 3 is optional)
+    if (step1Done && step2Done) {
+      checklist.classList.add('hidden');
+    } else {
+      checklist.classList.remove('hidden');
     }
   }
 
@@ -1352,22 +1703,42 @@
       e.preventDefault();
       dropZone.classList.add('drag-over');
     });
-    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone?.addEventListener('dragleave', e => {
+      // Only remove drag-over when leaving the drop zone itself, not a child element
+      if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over');
+    });
     dropZone?.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('drag-over');
-      if (e.dataTransfer.files[0]) nlLoadFile(e.dataTransfer.files[0]);
+      // Try files first (file system drops), then items fallback (browser drags, screenshot tools)
+      const file = e.dataTransfer.files[0] ||
+        [...(e.dataTransfer.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+      if (file) nlLoadFile(file);
     });
     fileInput?.addEventListener('change', () => {
       if (fileInput.files[0]) nlLoadFile(fileInput.files[0]);
     });
 
-    // Global paste — open modal and load image when not in a text field
+    // The drop zone is contenteditable=true purely so the browser's native right-click
+    // menu offers "Paste" (Chrome only shows that item for editable elements). Block every
+    // other editing operation so it never actually behaves like a text field.
+    dropZone?.addEventListener('beforeinput', e => e.preventDefault());
+    dropZone?.addEventListener('paste', e => {
+      e.preventDefault();
+      e.stopPropagation(); // handled here — don't let the global paste listener double-fire
+      const imageItem = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      const file = imageItem?.getAsFile();
+      if (file) nlLoadFile(file, 'Pasted screenshot');
+    });
+
+    // Global paste — load image when clipboard contains an image
+    // Only skip if focus is in a text-entry field that legitimately consumes text paste
+    const TEXT_PASTE_IDS = new Set(['nl-title','nl-description','nl-desc-text','nl-ai-modify-input','nl-url-input','nl-bulk-input']);
     document.addEventListener('paste', e => {
       const imageItem = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
       if (!imageItem) return;
-      const activeTag = document.activeElement?.tagName?.toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
+      const focused = document.activeElement;
+      if (focused && TEXT_PASTE_IDS.has(focused.id)) return;
       const file = imageItem.getAsFile();
       if (!file) return;
       e.preventDefault();
@@ -1385,10 +1756,13 @@
       tab.addEventListener('click', () => {
         const leaving = document.querySelector('.desc-tab.active')?.dataset.descTab;
         const arriving = tab.dataset.descTab;
-        // Sync before switching away from text editor
+        // Sync before switching away from text editor — merge the edited words back into
+        // the EXISTING HTML structure (headings, bullets, inline styles) instead of
+        // rebuilding fresh <p> tags, so editing text never destroys the SEO template.
         if (leaving === 'text') {
           const plain = $('nl-desc-text')?.value || '';
-          if ($('nl-description')) $('nl-description').value = nlTextToHtml(plain);
+          const original = $('nl-description')?.value || '';
+          if ($('nl-description')) $('nl-description').value = nlMergeTextIntoHtml(original, plain);
         }
         document.querySelectorAll('.desc-tab').forEach(t => t.classList.toggle('active', t === tab));
         $('nl-desc-edit-wrap')?.classList.toggle('hidden', arriving !== 'edit');
@@ -1426,8 +1800,13 @@
         if (val.startsWith('http')) nlAnalyzeUrl();
       }, 50);
     });
+    on('nl-quickfill-go', 'click', nlQuickFillByName);
+    on('nl-quickfill-input', 'keydown', e => { if (e.key === 'Enter') nlQuickFillByName(); });
+    on('nl-sold-comps-close', 'click', () => $('nl-sold-comps-strip')?.classList.add('hidden'));
     on('nl-bulk-go', 'click', nlBulkImport);
     on('nl-bulk-url-input', 'keydown', e => { if (e.key === 'Enter') nlBulkImport(); });
+    on('nl-ai-modify-go', 'click', nlAiModify);
+    on('nl-ai-modify-input', 'keydown', e => { if (e.key === 'Enter') nlAiModify(); });
 
     on('nl-btn-publish', 'click', () => nlSubmit('publish'));
 
@@ -1502,6 +1881,7 @@
 
   function closeNewListingModal() {
     $('new-listing-overlay')?.classList.add('hidden');
+    if (location.hash === '#ai') location.hash = 'dashboard';
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'dashboard'));
   }
 
@@ -1509,6 +1889,8 @@
     nlClearImage();
     nlClearForm();
     nlSetResult('', '');
+    $('nl-sold-comps-strip')?.classList.add('hidden');
+    if ($('nl-quickfill-input')) $('nl-quickfill-input').value = '';
   }
 
   function nlClearImage() {
@@ -1551,10 +1933,10 @@
     if ($('nl-duration-wrap')) $('nl-duration-wrap').style.display = 'none';
     if ($('nl-specifics-list')) $('nl-specifics-list').innerHTML = '';
     nlClearAllPhotoSlots();
-    // Reset description to edit tab
-    document.querySelectorAll('.desc-tab').forEach(t => t.classList.toggle('active', t.dataset.descTab === 'edit'));
-    $('nl-desc-edit-wrap')?.classList.remove('hidden');
-    $('nl-desc-text-wrap')?.classList.add('hidden');
+    // Reset description to the text tab (default)
+    document.querySelectorAll('.desc-tab').forEach(t => t.classList.toggle('active', t.dataset.descTab === 'text'));
+    $('nl-desc-edit-wrap')?.classList.add('hidden');
+    $('nl-desc-text-wrap')?.classList.remove('hidden');
     $('nl-desc-preview-wrap')?.classList.add('hidden');
     if ($('nl-desc-text')) $('nl-desc-text').value = '';
     if ($('nl-desc-preview')) $('nl-desc-preview').innerHTML = '';
@@ -1565,8 +1947,10 @@
   }
 
   function nlLoadFile(file, label = file.name || 'Product photo') {
-    if (!file.type.startsWith('image/')) return;
-    nlMimeType = file.type;
+    // Accept files with no type (some screenshot tools omit MIME); reject known non-images
+    const mime = file.type || 'image/png';
+    if (mime && !mime.startsWith('image/')) return;
+    nlMimeType = mime;
     const reader = new FileReader();
     reader.onload = ev => {
       nlImageBase64 = ev.target.result.split(',')[1];
@@ -1869,6 +2253,43 @@
     }
   }
 
+  async function nlAiModify() {
+    const input = $('nl-ai-modify-input');
+    const btn   = $('nl-ai-modify-go');
+    const instruction = input?.value.trim();
+    if (!instruction) return;
+
+    const payload = buildNlPayload();
+    if (!payload.title && !payload.description) {
+      alert('Fill in a listing first, then ask Claude to modify it.');
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = 'Applying…'; }
+    if (input) input.classList.add('loading');
+
+    try {
+      const res = await guardedFetch('/api/ai-modify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, instruction })
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || 'Modification failed');
+      }
+      const data = await res.json();
+      fillNlForm(data);
+      if (input) { input.value = ''; input.placeholder = '✓ Done — ask Claude for another change'; }
+      addActivity('AI modification applied', instruction);
+    } catch (e) {
+      alert('Claude modify failed: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = 'Apply'; }
+      if (input) input.classList.remove('loading');
+    }
+  }
+
   async function nlAnalyzeUrl() {
     const input = $('nl-url-input');
     const btn   = $('nl-url-go');
@@ -1903,6 +2324,7 @@
       fillNlForm(data);
       window._nlVisualDescription = data.visualDescription || '';
       window._nlImageType = 'webpage_screenshot';
+      if (data.title) nlLoadSoldComps(data.title);
 
       // Use only the first product image — show in preview and remove background
       const firstImgUrl = (data.imageUrls || []).find(u => u && (u.startsWith('http') || u.startsWith('/')));
@@ -1934,6 +2356,126 @@
     }
   }
 
+  async function nlLoadSoldComps(itemName) {
+    const strip    = $('nl-sold-comps-strip');
+    const summary  = $('nl-sold-comps-summary');
+    const link     = $('nl-sold-comps-link');
+    const terapeak = $('nl-sold-comps-terapeak');
+    const stats    = $('nl-sold-comps-stats');
+    const list     = $('nl-sold-comp-list');
+    if (!strip || !summary || !link || !terapeak || !stats || !list) return;
+
+    strip.classList.remove('hidden');
+    strip.classList.add('loading');
+    summary.textContent = '';
+    stats.classList.add('hidden');
+    list.innerHTML = '';
+    link.classList.add('hidden');
+    terapeak.classList.add('hidden');
+
+    try {
+      const res  = await fetch(`/api/sold-comps?q=${encodeURIComponent(itemName)}`);
+      const data = await res.json().catch(() => ({}));
+      strip.classList.remove('loading');
+
+      if (data.fallbackUrl) { link.href = data.fallbackUrl; link.classList.remove('hidden'); }
+      if (data.terapeakUrl) { terapeak.href = data.terapeakUrl; terapeak.classList.remove('hidden'); }
+
+      if (!res.ok || !data.count) {
+        summary.textContent = ''; // links alone are enough — no need to announce the absence of data
+        return;
+      }
+
+      summary.textContent = `Recently sold — "${itemName}"`;
+      $('nl-sold-comps-stat-avg').textContent    = `$${data.average.toFixed(2)}`;
+      $('nl-sold-comps-stat-median').textContent = `$${data.median.toFixed(2)}`;
+      $('nl-sold-comps-stat-min').textContent     = `$${data.min.toFixed(2)}`;
+      $('nl-sold-comps-stat-max').textContent     = `$${data.max.toFixed(2)}`;
+      $('nl-sold-comps-stat-count').textContent   = data.count;
+      stats.classList.remove('hidden');
+
+      // Show every sold item returned, newest first — scrollable, not capped to a handful
+      const sorted = [...data.items].sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
+      list.innerHTML = sorted.map(it => `
+        <a class="nl-sold-comp-row" href="${it.url}" target="_blank" rel="noopener">
+          ${it.imageUrl
+            ? `<img class="nl-sold-comp-thumb" src="${it.imageUrl}" alt="" loading="lazy" />`
+            : `<span class="nl-sold-comp-thumb nl-sold-comp-thumb-empty">📦</span>`}
+          <span class="nl-sold-comp-title">${esc(it.title)}</span>
+          <span class="nl-sold-comp-date">${new Date(it.soldDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+          <span class="nl-sold-comp-price">$${it.price.toFixed(2)}</span>
+        </a>`).join('');
+    } catch (err) {
+      strip.classList.remove('loading');
+      summary.textContent = `Sold-comp lookup failed: ${err.message}`;
+    }
+  }
+
+  async function nlQuickFillByName() {
+    const input    = $('nl-quickfill-input');
+    const btn      = $('nl-quickfill-go');
+    const itemName = input?.value.trim();
+    if (!itemName) return;
+
+    input?.classList.add('loading');
+    if (btn) { btn.disabled = true; btn.textContent = 'Researching…'; }
+    $('nl-ai-status')?.classList.remove('hidden');
+    $('nl-ai-done')?.classList.add('hidden');
+    $('nl-ai-error')?.classList.add('hidden');
+    if ($('nl-ai-msg')) $('nl-ai-msg').textContent = 'Researching the product and finding photos online…';
+
+    nlLoadSoldComps(itemName); // runs in parallel — independent of the listing fill below
+
+    try {
+      const res = await guardedFetch('/api/quick-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemName })
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || 'Quick-fill failed');
+      }
+      const data = await res.json();
+
+      nlClearAllPhotoSlots();
+      fillNlForm(data);
+      window._nlVisualDescription = data.visualDescription || '';
+      window._nlImageType = 'product_photo';
+
+      // First found photo → main preview + auto background removal → Picture 1.
+      // Remaining found photos go straight into the gallery slots as-is.
+      const foundUrls = (data.imageUrls || []).filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+      const absUrls = foundUrls.map(u => u.startsWith('/') ? window.location.origin + u : u);
+      if (absUrls[0]) {
+        const previewImg = $('nl-preview-img');
+        if (previewImg) previewImg.src = absUrls[0];
+        $('nl-drop-zone')?.classList.add('hidden');
+        $('nl-preview-wrap')?.classList.remove('hidden');
+        nlAutoRemoveBg(absUrls[0]);
+        absUrls.slice(1).forEach((u, i) => setPhotoSlotUrl(i + 1, u));
+      } else {
+        addActivity('No photos found online', 'Drop or paste a photo manually, or try a more specific item name');
+      }
+
+      const activeTab = draftTabs.find(t => t.id === activeDraftTabId);
+      if (activeTab) { activeTab.title = data.title || 'New Draft'; renderDraftTabs(); }
+
+      $('nl-ai-status')?.classList.add('hidden');
+      $('nl-ai-done')?.classList.remove('hidden');
+      addActivity('Quick-fill complete', data.title || itemName);
+      if (input) { input.value = ''; }
+    } catch (err) {
+      $('nl-ai-status')?.classList.add('hidden');
+      $('nl-ai-error')?.classList.remove('hidden');
+      if ($('nl-ai-error-msg')) $('nl-ai-error-msg').textContent = `Quick-fill failed: ${err.message}`;
+      addActivity('Quick-fill failed', err.message);
+    } finally {
+      input?.classList.remove('loading');
+      if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill'; }
+    }
+  }
+
   async function nlAnalyze() {
     if (!nlImageBase64) return;
 
@@ -1953,6 +2495,7 @@
       fillNlForm(data);
       window._nlVisualDescription = data.visualDescription || '';
       window._nlImageType = data.imageType || 'webpage_screenshot';
+      if (data.title) nlLoadSoldComps(data.title);
 
       // Reset photo slots before populating from analysis result
       nlClearAllPhotoSlots();
@@ -2144,6 +2687,7 @@
     set('nl-ean', d.ean || '');
     set('nl-isbn', d.isbn || '');
     set('nl-description', d.description || '');
+    if ($('nl-desc-text')) $('nl-desc-text').value = nlHtmlToText(d.description || ''); // keep the (now-default) text tab in sync
     set('nl-price', d.price || '');
     set('nl-quantity', d.quantity || 1);
     set('nl-qty-limit', d.quantityLimitPerBuyer || '');
@@ -2577,6 +3121,43 @@
       .join('\n');
   }
 
+  // The leaf block elements nlHtmlToText() walks to build plain text — kept as a single
+  // shared definition so extraction and merge-back always agree on the same paragraph order.
+  function nlDescBlocks(root) {
+    return [...root.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li')]
+      .filter(el => !el.querySelector('p, div, h1, h2, h3, h4, h5, h6, li'));
+  }
+
+  // Writes edited plain text back into the ORIGINAL description's HTML — every heading,
+  // bullet list, and inline style stays exactly as Claude generated it; only the wording of
+  // each paragraph/heading/list item changes. Falls back to a fresh rebuild only if the
+  // original has no recognizable structure to preserve.
+  function nlMergeTextIntoHtml(originalHtml, editedText) {
+    if (!originalHtml.trim()) return nlTextToHtml(editedText);
+
+    const tmp = document.createElement('div');
+    tmp.innerHTML = originalHtml;
+    const blocks = nlDescBlocks(tmp);
+    if (blocks.length === 0) return nlTextToHtml(editedText);
+
+    const paragraphs = editedText.trim() ? editedText.trim().split(/\n\n+/) : [];
+
+    blocks.forEach((el, i) => {
+      const text = paragraphs[i];
+      if (text === undefined) { el.remove(); return; } // paragraph deleted — drop that block
+      el.innerHTML = esc(text.trim()).replace(/\n/g, '<br>');
+    });
+
+    // Extra paragraphs beyond the original block count are new — append as plain <p> tags
+    if (paragraphs.length > blocks.length) {
+      const extraHtml = paragraphs.slice(blocks.length)
+        .map(p => '<p>' + esc(p.trim()).replace(/\n/g, '<br>') + '</p>').join('');
+      tmp.insertAdjacentHTML('beforeend', extraHtml);
+    }
+
+    return tmp.innerHTML;
+  }
+
   async function nlAutoRemoveBg(localUrl) {
     $('nl-cutout-wrap')?.classList.remove('hidden');
     $('nl-cutout-spinner')?.classList.remove('hidden');
@@ -2899,6 +3480,8 @@
     on('pg-imggen-mode', 'change', e => applyPgImggenVisibility(e.target.value));
     on('pg-imggen-save', 'click', savePgImggen);
     on('pg-imggen-test', 'click', testPgImggenConnection);
+    on('pg-terapeak-connect', 'click', terapeakConnect);
+    on('pg-terapeak-disconnect', 'click', terapeakDisconnect);
     on('pg-imggen-guide', 'click', openImageGenSetup);
     on('pg-imggen-load-models', 'click', () => {
       const endpoint = $('pg-imggen-endpoint')?.value.trim();

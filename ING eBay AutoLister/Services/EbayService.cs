@@ -37,6 +37,9 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
 
     // ── OAuth authorization URL ───────────────────────────────────────────────
 
+    // Stores the session ID for the in-flight OAuth request so /api/ebay/finish can validate it.
+    public string? PendingOAuthSession { get; private set; }
+
     public string GetAuthorizationUrl()
     {
         var c = creds.Get();
@@ -45,18 +48,19 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         if (c.EbaySandbox && string.IsNullOrWhiteSpace(c.EbayRuName))
             throw new InvalidOperationException("eBay RuName is not configured. Open Settings to add it.");
 
+        // Random 32-hex-char session ID used as state for CSRF protection and server-side session correlation
+        PendingOAuthSession = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLower();
+
         var redirectUri = GetOAuthRedirectUri(forceProduction: false);
         var scopes = Uri.EscapeDataString(string.Join(" ",
             "https://api.ebay.com/oauth/api_scope",
             "https://api.ebay.com/oauth/api_scope/sell.inventory",
             "https://api.ebay.com/oauth/api_scope/sell.account",
-            "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-            "https://api.ebay.com/oauth/api_scope/sell.listing"));
-        var state = Uri.EscapeDataString(c.EbaySandbox ? "ing-listing-engine-sandbox" : "ing-listing-engine-production");
+            "https://api.ebay.com/oauth/api_scope/sell.fulfillment"));
 
         return $"{AuthUrl}?client_id={Uri.EscapeDataString(c.EbayClientId)}" +
                $"&redirect_uri={Uri.EscapeDataString(redirectUri)}" +
-               $"&response_type=code&scope={scopes}&state={state}";
+               $"&response_type=code&scope={scopes}&state={Uri.EscapeDataString(PendingOAuthSession)}";
     }
 
     // ── Token exchange ────────────────────────────────────────────────────────
@@ -182,6 +186,101 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
             $"Saved: {!string.IsNullOrWhiteSpace(accessToken)}; Expires at: {(expiresIn > 0 ? DateTimeOffset.UtcNow.AddSeconds(expiresIn).ToString("u") : "unknown")}; Type: {tokenType}");
 
         return accessToken;
+    }
+
+    // ── Application (client_credentials) token — for Buy APIs that don't need a user login ──
+
+    private string? _appToken;
+    private DateTimeOffset _appTokenExpiry;
+
+    private async Task<string> GetApplicationTokenAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_appToken) && DateTimeOffset.UtcNow < _appTokenExpiry)
+            return _appToken;
+
+        var c = creds.Get();
+        if (string.IsNullOrWhiteSpace(c.EbayClientId) || string.IsNullOrWhiteSpace(c.EbayClientSecret))
+            throw new InvalidOperationException("eBay ClientId/ClientSecret not configured — cannot request an application token.");
+
+        var client = httpClientFactory.CreateClient();
+        var basicCreds = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{c.EbayClientId}:{c.EbayClientSecret}"));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basicCreds);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var body = new FormUrlEncodedContent([
+            new("grant_type", "client_credentials"),
+            new("scope", "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.marketplace.insights")
+        ]);
+
+        var response = await client.PostAsync(TokenUrl, body);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"eBay application token request failed (HTTP {(int)response.StatusCode}): {responseBody}");
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var accessToken = doc.RootElement.GetProperty("access_token").GetString() ?? "";
+        var expiresIn   = doc.RootElement.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
+
+        _appToken = accessToken;
+        _appTokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expiresIn - 60);
+        return accessToken;
+    }
+
+    // ── Recently-sold comps (Marketplace Insights API — last 90 days) ────────
+
+    public async Task<SoldCompsResult> SearchSoldCompsAsync(string query, int daysBack = 60)
+    {
+        var token = await GetApplicationTokenAsync();
+        var client = httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        client.DefaultRequestHeaders.Add("X-EBAY-C-MARKETPLACE-ID", "EBAY_US");
+
+        var url = "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search" +
+                   $"?q={Uri.EscapeDataString(query)}&limit=50";
+
+        var response = await client.GetAsync(url);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"Marketplace Insights request failed (HTTP {(int)response.StatusCode}): {responseBody}");
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var result = new SoldCompsResult { Query = query };
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-daysBack);
+
+        if (doc.RootElement.TryGetProperty("itemSales", out var sales))
+        {
+            foreach (var item in sales.EnumerateArray())
+            {
+                var soldDateStr = item.TryGetProperty("lastSoldDate", out var lsd) ? lsd.GetString() : null;
+                if (!DateTimeOffset.TryParse(soldDateStr, out var soldDate)) continue;
+                if (soldDate < cutoff) continue;
+
+                var price = item.TryGetProperty("lastSoldPrice", out var lp) &&
+                            lp.TryGetProperty("value", out var pv) &&
+                            decimal.TryParse(pv.GetString(), out var pVal) ? pVal : 0;
+
+                result.Items.Add(new SoldComp
+                {
+                    Title    = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                    Price    = price,
+                    SoldDate = soldDate.UtcDateTime,
+                    Url      = item.TryGetProperty("itemWebUrl", out var u) ? u.GetString() ?? "" : "",
+                    ImageUrl = item.TryGetProperty("image", out var img) && img.TryGetProperty("imageUrl", out var iu) ? iu.GetString() ?? "" : ""
+                });
+            }
+        }
+
+        if (result.Items.Count > 0)
+        {
+            var prices = result.Items.Select(i => i.Price).Where(p => p > 0).OrderBy(p => p).ToList();
+            result.Count   = prices.Count;
+            result.Average = prices.Count > 0 ? Math.Round(prices.Average(), 2) : 0;
+            result.Median  = prices.Count > 0 ? prices[prices.Count / 2] : 0;
+            result.Min     = prices.Count > 0 ? prices[0] : 0;
+            result.Max     = prices.Count > 0 ? prices[^1] : 0;
+        }
+
+        return result;
     }
 
     public async Task ProactiveTokenRefreshAsync()
@@ -1637,6 +1736,48 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
     // Extracts a string from an XML element by local name within a parent
     private static string Xstr(XElement parent, string localName) =>
         parent.Element(EbayNs + localName)?.Value ?? "";
+
+    // ── eBay Sniper — place a max bid via Trading API PlaceOffer ─────────────
+    public async Task PlaceMaxBidAsync(string itemId, decimal maxBid)
+    {
+        var token  = await GetOrRefreshTokenAsync();
+        var c      = creds.Get();
+        var client = httpClientFactory.CreateClient();
+
+        var body = $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <PlaceOfferRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
+              <ItemID>{itemId}</ItemID>
+              <Offer>
+                <Action>Bid</Action>
+                <MaxBid currencyID="USD">{maxBid:F2}</MaxBid>
+                <Quantity>1</Quantity>
+              </Offer>
+            </PlaceOfferRequest>
+            """;
+
+        var req = new HttpRequestMessage(HttpMethod.Post, "https://api.ebay.com/ws/api.dll")
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "text/xml")
+        };
+        req.Headers.Add("X-EBAY-API-SITEID", "0");
+        req.Headers.Add("X-EBAY-API-COMPATIBILITY-LEVEL", "967");
+        req.Headers.Add("X-EBAY-API-CALL-NAME", "PlaceOffer");
+        req.Headers.Add("X-EBAY-API-APP-NAME", c.EbayClientId ?? "");
+        req.Headers.Add("X-EBAY-API-DEV-NAME", c.EbayDevId ?? "");
+        req.Headers.Add("X-EBAY-API-CERT-NAME", c.EbayClientSecret ?? "");
+
+        var resp = await client.SendAsync(req);
+        var xml  = await resp.Content.ReadAsStringAsync();
+        var root = XElement.Parse(xml);
+        var ack  = root.Element(EbayNs + "Ack")?.Value ?? "";
+        if (ack != "Success" && ack != "Warning")
+        {
+            var msg = root.Descendants(EbayNs + "LongMessage").FirstOrDefault()?.Value ?? "Bid failed";
+            throw new Exception(msg);
+        }
+    }
 }
 
 public sealed record PublishListingResult(string OfferId, string ListingId, string Sku);

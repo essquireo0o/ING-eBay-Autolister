@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ING Listing Engine™ | ING Mining LLC</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-  <link rel="stylesheet" href="style.css?v=14" />
+  <link rel="stylesheet" href="style.css?v=22" />
 </head>
 <body>
   <div class="app-shell">
@@ -24,6 +24,7 @@
         <button class="nav-item" type="button" data-page="activity"><span class="nav-icon">📋</span>Activity</button>
         <button class="nav-item" type="button" data-page="logs"><span class="nav-icon">🔍</span>Logs</button>
         <button class="nav-item" type="button" data-page="settings"><span class="nav-icon">⚙️</span>Settings</button>
+        <button class="nav-item" type="button" data-page="sniper"><span class="nav-icon">🎯</span>eBay Sniper</button>
         <button class="nav-item nav-license" id="nav-license-btn" type="button" data-page="license"><span class="nav-icon">🔑</span>License<span id="nav-license-dot" class="nav-license-dot dot-off"></span></button>
       </nav>
       <div class="sidebar-footer">
@@ -39,12 +40,11 @@
           <input id="global-search" type="search" placeholder="Search title, SKU, listing ID, category..." />
         </div>
         <div class="topbar-actions">
-          <span id="license-badge" class="badge badge-off" title="License status">Freeware</span>
-          <span id="auth-status" class="badge badge-off">Not connected to eBay</span>
-          <button id="btn-paste-token" class="btn btn-primary" type="button">Paste eBay Token</button>
-          <button id="btn-connect" class="btn btn-ghost" type="button">OAuth Login</button>
+          <button id="btn-paste-token" class="btn btn-ghost hidden" type="button">Paste Token</button>
+          <button id="btn-connect" class="btn btn-primary" type="button">Log into eBay</button>
+          <span id="auth-status" class="badge badge-on hidden">✓ Connected to eBay</span>
           <button id="btn-disconnect" class="btn btn-ghost hidden" type="button">Disconnect</button>
-          <button id="btn-settings" class="btn btn-ghost" type="button" title="API credentials">Settings</button>
+          <button id="btn-settings" class="btn btn-ghost" type="button" title="Settings">⚙</button>
         </div>
       </header>
 
@@ -86,6 +86,47 @@
       </div>
 
       <section id="dashboard-section" class="dashboard-section">
+
+        <!-- Setup checklist — hidden once both steps complete -->
+        <div id="setup-checklist" class="hidden" style="background:#1e3a5f;border:1px solid #2563eb;border-radius:12px;padding:20px 24px;margin-bottom:24px;color:#e2e8f0;position:relative">
+          <button onclick="document.getElementById('setup-checklist').classList.add('hidden')" title="Dismiss" style="position:absolute;top:12px;right:12px;background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;line-height:1;padding:4px 8px">&times;</button>
+          <p style="font-size:13px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Get Started — 2 steps to activate</p>
+          <p style="font-size:12px;color:#64748b;margin-bottom:12px;margin-top:-8px">Step 3 is optional — you can always add it later in Settings.</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+
+            <!-- Step 1: AI key -->
+            <div id="step1-row" style="display:flex;align-items:center;gap:14px;background:#0f2744;border-radius:8px;padding:14px 16px">
+              <div id="step1-icon" style="width:28px;height:28px;border-radius:50%;background:#374151;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">1</div>
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Enter your AI API Key</div>
+                <div style="font-size:12px;color:#94a3b8">Powers listing analysis — AI reads your product photo and fills in title, description, price, and category automatically. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#60a5fa">console.anthropic.com</a> (~$5 gets hundreds of listings).</div>
+              </div>
+              <button id="step1-btn" onclick="document.getElementById('setup-overlay').classList.remove('hidden')" class="btn btn-primary" type="button" style="flex-shrink:0;white-space:nowrap">Enter Key →</button>
+            </div>
+
+            <!-- Step 2: eBay -->
+            <div id="step2-row" style="display:flex;align-items:center;gap:14px;background:#0f2744;border-radius:8px;padding:14px 16px">
+              <div id="step2-icon" style="width:28px;height:28px;border-radius:50%;background:#374151;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">2</div>
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Connect your eBay Account</div>
+                <div style="font-size:12px;color:#94a3b8">Log into eBay so the app can import your listings and publish new ones directly to your store.</div>
+              </div>
+              <button id="step2-btn" onclick="$('btn-connect')?.click()" class="btn btn-primary" type="button" style="flex-shrink:0;white-space:nowrap">Log into eBay →</button>
+            </div>
+
+            <!-- Step 3: OpenAI (optional) -->
+            <div id="step3-row" style="display:flex;align-items:center;gap:14px;background:#0f2744;border-radius:8px;padding:14px 16px;opacity:.8">
+              <div id="step3-icon" style="width:28px;height:28px;border-radius:50%;background:#374151;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;color:#94a3b8">3</div>
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">OpenAI Key <span style="font-size:11px;font-weight:400;background:#1e3a5f;color:#93c5fd;padding:2px 7px;border-radius:10px;margin-left:6px">Optional</span></div>
+                <div style="font-size:12px;color:#94a3b8">Only needed if you want AI to <strong style="color:#e2e8f0">generate product photos</strong> from scratch using DALL-E 3. Skip this if you'll photograph your own items. Get a key at <a href="https://platform.openai.com/api-keys" target="_blank" style="color:#60a5fa">platform.openai.com</a>.</div>
+              </div>
+              <button id="step3-btn" onclick="document.getElementById('setup-overlay').classList.remove('hidden')" class="btn btn-ghost" type="button" style="flex-shrink:0;white-space:nowrap;border:1px solid #2d3748;color:#94a3b8">Add Key →</button>
+            </div>
+
+          </div>
+        </div>
+
         <div class="hero-panel">
           <div>
             <p class="eyebrow">ING Mining LLC — Official Product</p>
@@ -191,20 +232,83 @@
             <button id="nl-close" class="nl-close-btn" type="button" title="Close">✕</button>
           </div>
 
-          <!-- URL browser bar -->
+          <!-- Action cards — outcome-driven, not generic form fields -->
           <div class="nl-url-section">
-            <div class="nl-url-bar">
-              <div class="nl-url-icon">🔗</div>
-              <input id="nl-url-input" type="url" class="nl-url-input"
-                placeholder="Paste any product URL or eBay link — AI fills the form automatically" />
-              <button id="nl-url-go" class="nl-url-go" type="button">Analyze</button>
+
+            <div class="nl-action-card nl-action-card--hero">
+              <span class="nl-action-badge">Try this first</span>
+              <div class="nl-action-head">
+                <span class="nl-action-icon">🧠</span>
+                <span class="nl-action-title">AI Product Research</span>
+              </div>
+              <p class="nl-action-how">Type a product name</p>
+              <p class="nl-action-why">→ AI finds photos, specs, sold prices, and creates a complete listing</p>
+              <div class="nl-action-row">
+                <input id="nl-quickfill-input" type="text" class="nl-url-input"
+                  placeholder="e.g. &quot;RTX 6000 Ada 48GB&quot;" />
+                <button id="nl-quickfill-go" class="nl-url-go nl-quickfill-go" type="button">Auto-Fill</button>
+              </div>
             </div>
-            <div class="nl-url-bar nl-bulk-bar">
-              <div class="nl-url-icon" style="opacity:.7">📦</div>
-              <input id="nl-bulk-url-input" type="url" class="nl-url-input"
-                placeholder="Import multiple products — paste a collection or category page URL" />
-              <button id="nl-bulk-go" class="nl-url-go nl-bulk-go" type="button">Import All</button>
+
+            <div class="nl-action-grid">
+              <div class="nl-action-card nl-action-card--url">
+                <div class="nl-action-head">
+                  <span class="nl-action-icon">🔗</span>
+                  <span class="nl-action-title">Import From URL</span>
+                </div>
+                <p class="nl-action-how">Paste any product page, supplier link, Amazon, Alibaba, or eBay listing</p>
+                <p class="nl-action-why">→ AI extracts everything and builds a complete listing</p>
+                <div class="nl-action-row">
+                  <input id="nl-url-input" type="url" class="nl-url-input" placeholder="Paste a product or eBay URL…" />
+                  <button id="nl-url-go" class="nl-url-go" type="button">Analyze</button>
+                </div>
+              </div>
+
+              <div class="nl-action-card nl-action-card--bulk">
+                <div class="nl-action-head">
+                  <span class="nl-action-icon">📦</span>
+                  <span class="nl-action-title">Bulk Catalog Import</span>
+                </div>
+                <p class="nl-action-how">Paste a category or supplier catalog URL</p>
+                <p class="nl-action-why">→ Generate listings for every product automatically</p>
+                <div class="nl-action-row">
+                  <input id="nl-bulk-url-input" type="url" class="nl-url-input" placeholder="Paste a collection or category page URL…" />
+                  <button id="nl-bulk-go" class="nl-url-go nl-bulk-go" type="button">Import All</button>
+                </div>
+              </div>
+
+              <div class="nl-action-card nl-action-card--assistant">
+                <div class="nl-action-head">
+                  <span class="nl-action-icon">✨</span>
+                  <span class="nl-action-title">AI Listing Assistant</span>
+                </div>
+                <p class="nl-action-how">Tell AI what to change</p>
+                <p class="nl-action-why">→ Improve SEO, rewrite descriptions, optimize pricing, or target different buyers</p>
+                <div class="nl-action-row">
+                  <input id="nl-ai-modify-input" type="text" class="nl-url-input nl-ai-modify-input"
+                    placeholder="e.g. &quot;shorten the title&quot;, &quot;lower price 10%&quot;…" />
+                  <button id="nl-ai-modify-go" class="nl-url-go nl-ai-modify-go" type="button">Apply</button>
+                </div>
+              </div>
             </div>
+          </div>
+
+          <div id="nl-sold-comps-strip" class="nl-sold-comps-strip hidden">
+            <button id="nl-sold-comps-close" class="nl-sold-comps-close" type="button" title="Dismiss">✕</button>
+            <div class="nl-sold-comps-head">
+              <span class="nl-sold-comps-glyph">📊</span>
+              <a id="nl-sold-comps-terapeak" class="nl-sold-comps-link" href="#" target="_blank" rel="noopener">Terapeak Research ↗</a>
+              <a id="nl-sold-comps-link" class="nl-sold-comps-link nl-sold-comps-link-secondary" href="#" target="_blank" rel="noopener">Plain Sold Search ↗</a>
+              <span id="nl-sold-comps-summary" class="nl-sold-comps-summary-text"></span>
+            </div>
+            <div id="nl-sold-comps-stats" class="nl-sold-comps-stats hidden">
+              <div class="nl-sold-comps-stat"><span class="nl-sold-comps-stat-val" id="nl-sold-comps-stat-avg">$0</span><span class="nl-sold-comps-stat-label">Average</span></div>
+              <div class="nl-sold-comps-stat"><span class="nl-sold-comps-stat-val" id="nl-sold-comps-stat-median">$0</span><span class="nl-sold-comps-stat-label">Median</span></div>
+              <div class="nl-sold-comps-stat"><span class="nl-sold-comps-stat-val" id="nl-sold-comps-stat-min">$0</span><span class="nl-sold-comps-stat-label">Low</span></div>
+              <div class="nl-sold-comps-stat"><span class="nl-sold-comps-stat-val" id="nl-sold-comps-stat-max">$0</span><span class="nl-sold-comps-stat-label">High</span></div>
+              <div class="nl-sold-comps-stat nl-sold-comps-stat-count"><span class="nl-sold-comps-stat-val" id="nl-sold-comps-stat-count">0</span><span class="nl-sold-comps-stat-label">Sold (60d)</span></div>
+            </div>
+            <div id="nl-sold-comp-list" class="nl-sold-comp-table"></div>
           </div>
 
           <div class="new-listing-body">
@@ -214,7 +318,7 @@
               <p class="nl-section-heading">Photo &amp; Analysis</p>
               <p class="nl-panel-label">Product Photo</p>
 
-              <div id="nl-drop-zone" class="nl-drop-zone" tabindex="0">
+              <div id="nl-drop-zone" class="nl-drop-zone" tabindex="0" contenteditable="true" spellcheck="false">
                 <div class="nl-drop-icon"></div>
                 <p class="nl-drop-title">Drop or paste a photo here</p>
                 <p class="nl-drop-sub">or <span class="link">click to browse</span> &nbsp;·&nbsp; JPG, PNG, WEBP</p>
@@ -335,16 +439,16 @@
                   <summary>Description</summary>
                   <div class="field">
                     <div class="desc-tab-bar">
-                      <button class="desc-tab active" data-desc-tab="edit" type="button">Edit HTML</button>
-                      <button class="desc-tab" data-desc-tab="text" type="button">Edit Text</button>
+                      <button class="desc-tab active" data-desc-tab="text" type="button">Edit Text</button>
+                      <button class="desc-tab" data-desc-tab="edit" type="button">Edit HTML</button>
                       <button class="desc-tab" data-desc-tab="preview" type="button">Preview</button>
                       <span class="desc-tab-hint">eBay-safe HTML &nbsp;<span class="char-count" id="nl-desc-count">0 / 4000</span></span>
                     </div>
-                    <div id="nl-desc-edit-wrap">
+                    <div id="nl-desc-edit-wrap" class="hidden">
                       <textarea id="nl-description" rows="10" placeholder="Full listing description. HTML is supported and rendered live in Preview."></textarea>
                     </div>
-                    <div id="nl-desc-text-wrap" class="hidden">
-                      <textarea id="nl-desc-text" rows="10" placeholder="Edit as plain text. Paragraphs (blank lines) are preserved when switching back to HTML."></textarea>
+                    <div id="nl-desc-text-wrap">
+                      <textarea id="nl-desc-text" rows="10" placeholder="Edit as plain text. Headings, bullet points, and styling are preserved when switching back to HTML."></textarea>
                     </div>
                     <div id="nl-desc-preview-wrap" class="hidden">
                       <div id="nl-desc-preview" class="nl-desc-preview"></div>
@@ -565,6 +669,59 @@
 
       </section>
 
+      <!-- ── eBay Sniper ─────────────────────────────────────────── -->
+      <section id="sniper-section" class="panel hidden">
+        <div class="panel-header">
+          <div>
+            <h2>🎯 eBay Sniper</h2>
+            <p style="font-size:13px;color:var(--muted);margin-top:2px">Track auctions and auto-bid in the final seconds to win at the lowest price.</p>
+          </div>
+          <button id="btn-sniper-add" class="btn btn-primary" type="button">+ Add Auction</button>
+        </div>
+
+        <!-- Add auction form -->
+        <div id="sniper-add-form" class="hidden" style="background:#1e2330;border:1px solid #2d3748;border-radius:12px;padding:20px 24px;margin-bottom:20px">
+          <h3 style="margin-bottom:16px;font-size:15px">Track New Auction</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
+            <div>
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">eBay Item URL or Item ID</label>
+              <input id="sniper-url-input" type="text" placeholder="https://www.ebay.com/itm/123456789 or 123456789" style="width:100%;padding:9px 12px;border:1px solid #374151;border-radius:8px;background:#0f1117;color:#e2e8f0;font-size:13px" />
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Your Max Bid (USD)</label>
+              <input id="sniper-bid-input" type="number" min="0.01" step="0.01" placeholder="e.g. 125.00" style="width:100%;padding:9px 12px;border:1px solid #374151;border-radius:8px;background:#0f1117;color:#e2e8f0;font-size:13px" />
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="btn-sniper-submit" class="btn btn-primary" type="button">Track It</button>
+              <button id="btn-sniper-cancel" class="btn btn-ghost" type="button">Cancel</button>
+            </div>
+          </div>
+          <p style="font-size:11px;color:#64748b;margin-top:10px">⏱ Bid is placed automatically 8 seconds before the auction ends. You must be logged into eBay in this app.</p>
+        </div>
+
+        <!-- Snipes table -->
+        <div id="sniper-list-wrap">
+          <div id="sniper-empty" style="text-align:center;padding:60px 20px;color:#4b5563">
+            <div style="font-size:40px;margin-bottom:12px">🎯</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">No auctions tracked yet</div>
+            <div style="font-size:13px">Click <strong>+ Add Auction</strong> and paste an eBay auction URL to get started.</div>
+          </div>
+          <table id="sniper-table" class="hidden" style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="border-bottom:1px solid #2d3748;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.05em">
+                <th style="padding:10px 12px;text-align:left;font-weight:600">Item</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:600">Ends</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:600">Current Bid</th>
+                <th style="padding:10px 12px;text-align:right;font-weight:600">Your Max</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:600">Status</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:600"></th>
+              </tr>
+            </thead>
+            <tbody id="sniper-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="settings-section" class="panel settings-panel hidden">
         <div class="panel-header">
           <div>
@@ -614,6 +771,20 @@
             &nbsp;&nbsp;
             <button id="pg-imggen-guide" class="btn btn-ghost small" type="button">Full Setup Guide</button>
           </p>
+        <!-- Terapeak — real sold-comp data via a saved logged-in session (no public API exists) -->
+        <div class="setup-section imggen-settings-card">
+          <h3>Terapeak (Sold Comps)</h3>
+          <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
+            eBay doesn't offer a Terapeak API, so this logs into eBay once in a real browser window and saves that
+            session locally to read real sold-price data for Auto-Fill. Your eBay password is never seen or stored by this app.
+          </p>
+          <div class="imggen-test-row">
+            <button id="pg-terapeak-connect" class="btn btn-primary" type="button">Connect Terapeak</button>
+            <button id="pg-terapeak-disconnect" class="btn btn-secondary hidden" type="button">Disconnect</button>
+            <span id="pg-terapeak-status" class="sd-test-msg">Not connected — sold comps will show links only.</span>
+          </div>
+        </div>
+
         <!-- Listing Defaults — pre-filled into every new listing -->
         <div class="setup-section imggen-settings-card">
           <h3>Listing Defaults</h3>
@@ -975,36 +1146,37 @@
   <div id="setup-overlay" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2>API Credentials</h2>
+        <h2>Settings</h2>
         <button id="btn-close-setup" class="modal-close" type="button" title="Close">X</button>
       </div>
-      <p class="modal-desc">Credentials are saved locally on this machine and used only for the configured APIs.</p>
+      <p class="modal-desc" id="setup-modal-desc">Your keys are saved locally on this machine — never sent anywhere except the AI service you choose.</p>
+      <input id="s-license-key" type="hidden" value="" />
 
-      <div class="setup-section">
-        <h3>License</h3>
-        <div class="field">
-          <label>License Key</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="s-license-key" type="text" placeholder="ING-FREE-XXXX or ING-PRO-XXXX" autocomplete="off" style="flex:1" />
-            <button id="btn-activate-license" class="btn btn-secondary" type="button">Activate</button>
-          </div>
-        </div>
-        <div id="license-activate-msg" class="sd-test-msg" style="margin-top:6px"></div>
+      <div id="setup-preconfigured-notice" class="hidden" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#166534">
+        <strong>✓ eBay is pre-configured.</strong> Enter your Anthropic API key below, then click Save and Connect eBay.
       </div>
 
-      <div class="setup-section">
-        <h3>AI Provider</h3>
+      <div class="setup-section" id="setup-ai-provider">
+        <h3>AI Key <span style="font-weight:400;font-size:13px;color:var(--muted)">— powers listing analysis &amp; auto-fill</span></h3>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#374151;line-height:1.6">
+          <strong>What this does:</strong> When you drop a photo or scan an item, AI reads the image and automatically fills in the title, description, price estimate, category, and item specifics — so you don't have to type it all manually.<br><br>
+          <strong>You only need one key.</strong> Use <strong>Anthropic</strong> (recommended) <em>or</em> OpenAI — not both.
+          <ul style="margin:8px 0 0 16px;padding:0">
+            <li><strong>Anthropic Claude</strong> — best for listing analysis. ~$5 gets you hundreds of listings. <a href="https://console.anthropic.com/settings/keys" target="_blank" class="link-ext">Get key at console.anthropic.com</a></li>
+            <li style="margin-top:4px"><strong>OpenAI</strong> — alternative option, also supports DALL-E photo generation. <a href="https://platform.openai.com/api-keys" target="_blank" class="link-ext">Get key at platform.openai.com</a></li>
+          </ul>
+        </div>
         <div class="field">
-          <label>Anthropic API Key <span class="hint-inline">— listing analysis</span> <a href="https://console.anthropic.com/settings/keys" target="_blank" class="link-ext">Get key</a></label>
+          <label>Anthropic API Key <span class="hint-inline">— recommended</span></label>
           <input id="s-anthropic-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
         </div>
         <div class="field">
-          <label>OpenAI API Key <span class="hint-inline">— AI product photo generation (DALL-E 3)</span> <a href="https://platform.openai.com/api-keys" target="_blank" class="link-ext">Get key</a></label>
+          <label>OpenAI API Key <span class="hint-inline">— optional alternative (also enables DALL-E photo generation)</span></label>
           <input id="s-openai-key" type="password" placeholder="sk-..." autocomplete="off" />
         </div>
       </div>
 
-      <div class="setup-section">
+      <div class="setup-section" id="setup-ebay-developer">
         <h3>eBay Developer</h3>
         <div class="setup-env">
           <label class="toggle-label">
@@ -1028,14 +1200,12 @@
           <label>RuName <span class="hint-inline">Sandbox only; Production uses the RuName you configured</span></label>
           <input id="s-runame" type="text" placeholder="YourName-AppName-PRD-xxxxxxxx" autocomplete="off" />
         </div>
-        <p class="modal-note">Production OAuth uses the RuName saved above. Configure that RuName's accepted URL in your eBay developer portal, then complete the OAuth flow and paste the full redirect URL below.</p>
-        <div class="field">
-          <label>Paste eBay OAuth Redirect URL</label>
-          <textarea id="s-oauth-redirect-url" rows="3" placeholder="https://your-oauth-redirect-url?code=...&state=..." autocomplete="off"></textarea>
-        </div>
-        <div class="modal-actions compact-actions">
-          <div id="oauth-redirect-msg"></div>
-          <button id="btn-exchange-oauth-redirect" class="btn btn-secondary" type="button">Exchange Production OAuth URL</button>
+        <div id="ebay-oauth-step" class="hidden" style="margin-top:16px;padding:16px;background:#0f2a1a;border:1px solid #166534;border-radius:10px">
+          <p style="font-size:13px;font-weight:700;color:#4ade80;margin-bottom:8px">Step 2 — Copy the URL and click below</p>
+          <p style="font-size:12px;color:#86efac;margin-bottom:12px">eBay opened in a new tab. Log in, then eBay will redirect you to inglisting.com. <strong>Copy the URL from that page</strong> (Ctrl+A, Ctrl+C in the address bar), then click the button below.</p>
+          <button id="btn-paste-and-connect" class="btn btn-primary" type="button" style="width:100%;font-size:15px;padding:12px">📋 I've Logged In — Paste &amp; Connect</button>
+          <div id="oauth-redirect-msg" style="margin-top:8px;font-size:12px"></div>
+          <textarea id="s-oauth-redirect-url" rows="2" placeholder="Or paste the full redirect URL here manually…" autocomplete="off" style="width:100%;margin-top:10px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1117;color:#e2e8f0;font-size:12px;resize:vertical"></textarea>
         </div>
         <div class="field">
           <label>User Token <span class="hint-inline">optional</span></label>
@@ -1233,6 +1403,6 @@
 
   <!-- Trial paywall removed — app is freeware -->
 
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

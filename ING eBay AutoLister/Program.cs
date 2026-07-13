@@ -75,7 +75,7 @@ if (!isWindowsService)
         System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
         using var trayIconSvc = new System.Windows.Forms.NotifyIcon
         {
-            Icon    = System.Drawing.SystemIcons.Application,
+            Icon    = CreateAppIcon(),
             Text    = "ING AutoLister  •  localhost:9330",
             Visible = true,
         };
@@ -1005,11 +1005,56 @@ app.MapGet("/api/image-gen/mode", (CredentialsStore store) =>
 app.MapGet("/api/ebay/auth-url", (EbayService ebay) =>
     Results.Ok(new { url = ebay.GetAuthorizationUrl() }));
 
+// Legacy direct callback (sandbox / local dev only)
 app.MapGet("/api/ebay/callback", async (string code, EbayService ebay, CredentialsStore store, HttpContext ctx) =>
 {
     var token = await ebay.ExchangeCodeForTokenResultAsync(code);
     store.SaveOAuthTokensFull(token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshTokenExpiresIn, token.TokenType);
     ctx.Response.Redirect("/");
+});
+
+// Server-relay finish: eBay → inglisting.com/api/ebay/callback (PHP) → here
+// PHP already exchanged the code; this endpoint fetches the tokens from the server pickup endpoint.
+app.MapGet("/api/ebay/finish", async (string session, string pickup, EbayService ebay, CredentialsStore store, ActionLog log, IHttpClientFactory httpFactory, HttpContext ctx) =>
+{
+    // Validate session matches what we generated (CSRF check)
+    if (ebay.PendingOAuthSession != session)
+    {
+        log.Add("Warning", "OAuth finish: state mismatch", $"Expected {ebay.PendingOAuthSession}, got {session}");
+        ctx.Response.Redirect("/?ebay_error=state_mismatch");
+        return;
+    }
+
+    try
+    {
+        var client = httpFactory.CreateClient();
+        var pickupUrl = $"https://inglisting.com/api/ebay/pickup/?session={Uri.EscapeDataString(session)}&pickup={Uri.EscapeDataString(pickup)}";
+        var res = await client.GetAsync(pickupUrl);
+        var body = await res.Content.ReadAsStringAsync();
+
+        if (!res.IsSuccessStatusCode)
+        {
+            log.Add("Warning", "OAuth pickup failed", body);
+            ctx.Response.Redirect("/?ebay_error=pickup_failed");
+            return;
+        }
+
+        var tokens = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(body)!;
+        var accessToken   = tokens.GetValueOrDefault("access_token").GetString()   ?? "";
+        var refreshToken  = tokens.GetValueOrDefault("refresh_token").GetString()  ?? "";
+        var expiresIn     = tokens.GetValueOrDefault("expires_in").TryGetInt32(out var ei) ? ei : 7200;
+        var refreshExpiry = tokens.GetValueOrDefault("refresh_token_expires_in").TryGetInt32(out var ri) ? ri : 47304000;
+        var tokenType     = tokens.GetValueOrDefault("token_type").GetString()     ?? "User Access Token";
+
+        store.SaveOAuthTokensFull(accessToken, refreshToken, expiresIn, refreshExpiry, tokenType);
+        log.Add("Info", "eBay OAuth connected via server relay", "Tokens saved successfully.");
+        ctx.Response.Redirect("/?ebay_connected=1");
+    }
+    catch (Exception ex)
+    {
+        log.Add("Error", "OAuth finish exception", ex.Message);
+        ctx.Response.Redirect("/?ebay_error=exception");
+    }
 });
 
 app.MapPost("/api/ebay/token", async (EbayAuthRequest req, EbayService ebay, CredentialsStore store) =>
@@ -1548,6 +1593,42 @@ load();
     return Results.Content(html, "text/html");
 });
 
+// ── eBay Sniper ───────────────────────────────────────────────────────────────
+app.MapGet("/api/sniper/lookup", async (string itemId, EbayService ebay, ActionLog log) =>
+{
+    try
+    {
+        var item = await ebay.GetItemAsync(itemId);
+        return Results.Ok(new
+        {
+            itemId,
+            title      = item.Title ?? "",
+            endsAt     = (string?)null,   // Trading API GetItem can return EndTime — wired below
+            currentBid = item.Price,
+        });
+    }
+    catch (Exception ex)
+    {
+        log.Add("Warning", "Sniper lookup failed", ex.Message);
+        return Results.Ok(new { itemId, title = "", endsAt = (string?)null, currentBid = (decimal?)null });
+    }
+});
+
+app.MapPost("/api/sniper/bid", async (SniperBidRequest req, EbayService ebay, ActionLog log) =>
+{
+    try
+    {
+        await ebay.PlaceMaxBidAsync(req.ItemId, req.MaxBid);
+        log.Add("Info", "Sniper bid placed", $"Item {req.ItemId} @ ${req.MaxBid:F2}");
+        return Results.Ok(new { ok = true });
+    }
+    catch (Exception ex)
+    {
+        log.Add("Warning", "Sniper bid failed", ex.Message);
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
+
 // ── Service mode: headless web server, lifecycle managed by Windows SCM ──────
 if (isWindowsService)
 {
@@ -1577,7 +1658,7 @@ System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
 
 using var trayIcon = new System.Windows.Forms.NotifyIcon
 {
-    Icon    = System.Drawing.SystemIcons.Application,
+    Icon    = CreateAppIcon(),
     Text    = "ING AutoLister  •  localhost:9330",
     Visible = true,
 };
@@ -1600,6 +1681,45 @@ trayIcon.DoubleClick      += (_, _) => OpenBrowser();
 System.Windows.Forms.Application.Run(); // blocks until ExitThread()
 await app.StopAsync(TimeSpan.FromSeconds(3));
 _mutex?.Dispose();
+
+static System.Drawing.Icon CreateAppIcon()
+{
+    var bmp = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+    using var g = System.Drawing.Graphics.FromImage(bmp);
+    g.SmoothingMode     = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+    g.Clear(System.Drawing.Color.Transparent);
+
+    // Dark teal rounded background
+    var teal = System.Drawing.Color.FromArgb(8, 37, 41);   // #082529
+    var gold = System.Drawing.Color.FromArgb(199, 154, 54); // #c79a36
+
+    using var bgBrush = new System.Drawing.SolidBrush(teal);
+    using var path = new System.Drawing.Drawing2D.GraphicsPath();
+    int r = 5;
+    path.AddArc(0, 0, r * 2, r * 2, 180, 90);
+    path.AddArc(32 - r * 2, 0, r * 2, r * 2, 270, 90);
+    path.AddArc(32 - r * 2, 32 - r * 2, r * 2, r * 2, 0, 90);
+    path.AddArc(0, 32 - r * 2, r * 2, r * 2, 90, 90);
+    path.CloseFigure();
+    g.FillPath(bgBrush, path);
+
+    // Gold price-tag arrow: H5 10  H19 L27 16 L19 22 H5 Z  (scaled from 32px viewBox)
+    var tagPts = new System.Drawing.PointF[]
+    {
+        new(4,  9), new(18, 9), new(26, 16),
+        new(18, 23), new(4, 23)
+    };
+    using var tagBrush = new System.Drawing.SolidBrush(gold);
+    g.FillPolygon(tagBrush, tagPts);
+
+    // Punch hole
+    using var holeBrush = new System.Drawing.SolidBrush(teal);
+    g.FillEllipse(holeBrush, 5.5f, 14f, 4f, 4f);
+
+    var handle = bmp.GetHicon();
+    return System.Drawing.Icon.FromHandle(handle);
+}
 
 static void OpenBrowser() =>
     System.Diagnostics.Process.Start(

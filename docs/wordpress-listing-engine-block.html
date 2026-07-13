@@ -1,0 +1,246 @@
+<!--
+  ING LISTING ENGINE — WordPress Custom HTML Block
+  ══════════════════════════════════════════════════
+  HOW TO ADD THIS TO YOUR HOMEPAGE:
+
+  1. Go to: WordPress Admin → Pages → Home → Edit with Elementor
+  2. Find the RigAlert section
+  3. Click the "+" icon directly BELOW it to add a new widget
+  4. Drag in a "Custom HTML" widget
+  5. Paste this ENTIRE file into the HTML box
+  6. Click Update / Publish
+
+  Images load from GitHub (no upload needed).
+  ══════════════════════════════════════════════════
+-->
+
+<style>
+.ingle-wrap{
+  background:linear-gradient(180deg,#060b12 0%,#080d06 60%,#060b12 100%);
+  border-top:1px solid rgba(255,195,0,.1);
+  border-bottom:1px solid rgba(255,195,0,.1);
+  padding:88px 24px;
+  position:relative;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+}
+.ingle-wrap *{box-sizing:border-box;}
+.ingle-glow-r{
+  position:absolute;top:-160px;right:-120px;width:540px;height:540px;
+  background:radial-gradient(circle,rgba(255,195,0,.09) 0%,transparent 70%);
+  pointer-events:none;
+}
+.ingle-glow-l{
+  position:absolute;bottom:-100px;left:-80px;width:380px;height:380px;
+  background:radial-gradient(circle,rgba(247,147,26,.07) 0%,transparent 70%);
+  pointer-events:none;
+}
+.ingle-inner{max-width:1100px;margin:0 auto;position:relative;z-index:1;}
+
+/* header */
+.ingle-head{text-align:center;max-width:720px;margin:0 auto 52px;}
+.ingle-tag{
+  display:inline-flex;align-items:center;gap:7px;
+  background:rgba(255,195,0,.1);border:1px solid rgba(255,195,0,.28);
+  border-radius:100px;padding:4px 14px;
+  font-size:11px;font-weight:700;color:#ffc300;
+  letter-spacing:.9px;text-transform:uppercase;margin-bottom:18px;
+}
+.ingle-live{
+  width:6px;height:6px;border-radius:50%;background:#22c55e;
+  animation:ingle-pulse 2s infinite;display:inline-block;
+}
+@keyframes ingle-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ingle-head h2{
+  font-size:clamp(26px,4vw,44px);font-weight:800;line-height:1.1;
+  letter-spacing:-1px;color:#f1f5f9;margin:0 0 14px;
+}
+.ingle-head h2 span{color:#ffc300;}
+.ingle-head p{font-size:17px;color:#94a3b8;line-height:1.7;margin:0;}
+
+/* steps */
+.ingle-steps{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:18px;margin-bottom:48px;
+}
+@media(max-width:640px){.ingle-steps{grid-template-columns:1fr;}}
+.ingle-step{
+  text-align:center;padding:28px 20px;
+  background:#0d1520;border:1px solid rgba(255,255,255,.07);
+  border-radius:14px;
+}
+.ingle-step.active{border-color:rgba(255,195,0,.22);box-shadow:0 0 40px rgba(255,195,0,.04);}
+.ingle-step-num{
+  width:44px;height:44px;
+  background:rgba(255,195,0,.12);border:1px solid rgba(255,195,0,.28);
+  border-radius:12px;display:flex;align-items:center;justify-content:center;
+  margin:0 auto 14px;font-size:20px;font-weight:900;color:#ffc300;
+}
+.ingle-step h3{font-size:15px;font-weight:700;color:#f1f5f9;margin:0 0 6px;}
+.ingle-step p{font-size:13px;color:#94a3b8;line-height:1.6;margin:0;}
+
+/* hero screenshot */
+.ingle-frame{
+  border-radius:14px;overflow:hidden;
+  border:1px solid rgba(255,195,0,.18);
+  box-shadow:0 28px 80px rgba(0,0,0,.65),0 0 0 1px rgba(255,195,0,.05);
+  margin-bottom:18px;
+}
+.ingle-frame-bar{
+  background:#0d1117;border-bottom:1px solid rgba(255,255,255,.07);
+  height:36px;display:flex;align-items:center;padding:0 14px;gap:7px;
+}
+.ingle-dot{width:11px;height:11px;border-radius:50%;}
+.ingle-dot-r{background:#ff5f57;}.ingle-dot-y{background:#ffbd2e;}.ingle-dot-g{background:#28c840;}
+.ingle-frame-title{
+  margin-left:10px;font-size:11px;color:rgba(255,255,255,.25);
+  font-family:monospace;letter-spacing:.3px;
+}
+.ingle-frame img{width:100%;display:block;}
+
+/* 4-shot grid */
+.ingle-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);
+  gap:14px;margin-bottom:48px;
+}
+@media(max-width:560px){.ingle-grid{grid-template-columns:1fr;}}
+.ingle-grid-item{
+  border-radius:10px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.07);
+  box-shadow:0 8px 28px rgba(0,0,0,.45);
+}
+.ingle-grid-item img{width:100%;display:block;}
+
+/* chips */
+.ingle-chips{
+  display:flex;flex-wrap:wrap;justify-content:center;
+  gap:10px;margin-bottom:36px;
+}
+.ingle-chip{
+  background:rgba(255,195,0,.1);border:1px solid rgba(255,195,0,.22);
+  border-radius:100px;padding:6px 16px;
+  font-size:13px;font-weight:600;color:#ffc300;
+}
+
+/* CTAs */
+.ingle-ctas{text-align:center;}
+.ingle-cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;}
+.ingle-btn-dl{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:15px 34px;background:#ffc300;color:#111;
+  font-size:15px;font-weight:700;border-radius:9px;text-decoration:none;
+  box-shadow:0 6px 24px rgba(255,195,0,.38);transition:all .15s;
+}
+.ingle-btn-dl:hover{background:#d4a017;transform:translateY(-1px);text-decoration:none;}
+.ingle-btn-demo{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:15px 26px;background:transparent;
+  border:1px solid rgba(255,255,255,.13);color:#e5e7eb;
+  font-size:15px;font-weight:600;border-radius:9px;text-decoration:none;
+  transition:all .15s;
+}
+.ingle-btn-demo:hover{background:#111827;border-color:rgba(255,255,255,.22);text-decoration:none;}
+.ingle-meta{font-size:11px;color:#475569;}
+</style>
+
+<div class="ingle-wrap">
+  <div class="ingle-glow-r"></div>
+  <div class="ingle-glow-l"></div>
+  <div class="ingle-inner">
+
+    <!-- Header -->
+    <div class="ingle-head">
+      <div class="ingle-tag">
+        <span class="ingle-live"></span>
+        Free AI eBay Tool from ING Mining
+      </div>
+      <h2>ING Listing Engine — <span>List in 10 Seconds</span></h2>
+      <p>
+        Paste any product URL. Claude AI reads the page and fills your entire eBay listing —
+        title, description, all 20+ item specifics, pricing, and photos.
+        Free for Windows. No subscription. No expiry.
+      </p>
+    </div>
+
+    <!-- How it works -->
+    <div class="ingle-steps">
+      <div class="ingle-step">
+        <div class="ingle-step-num">1</div>
+        <h3>Paste a URL</h3>
+        <p>Drop in any product page — supplier site, Amazon, eBay, anywhere.</p>
+      </div>
+      <div class="ingle-step active">
+        <div class="ingle-step-num">2</div>
+        <h3>AI Fills Everything</h3>
+        <p>Claude AI writes the title, description, item specifics, and suggested price.</p>
+      </div>
+      <div class="ingle-step">
+        <div class="ingle-step-num">3</div>
+        <h3>Publish to eBay</h3>
+        <p>One click sends the complete listing live via eBay's official API.</p>
+      </div>
+    </div>
+
+    <!-- Hero screenshot -->
+    <div class="ingle-frame">
+      <div class="ingle-frame-bar">
+        <span class="ingle-dot ingle-dot-r"></span>
+        <span class="ingle-dot ingle-dot-y"></span>
+        <span class="ingle-dot ingle-dot-g"></span>
+        <span class="ingle-frame-title">ING Listing Engine — Dashboard</span>
+      </div>
+      <img
+        src="https://raw.githubusercontent.com/essquireo0o/ING-eBay-Autolister/main/docs/screenshots/01-dashboard-overview.png"
+        alt="ING Listing Engine — AI eBay listing software dashboard overview">
+    </div>
+
+    <!-- 4-screenshot grid -->
+    <div class="ingle-grid">
+      <div class="ingle-grid-item">
+        <img
+          src="https://raw.githubusercontent.com/essquireo0o/ING-eBay-Autolister/main/docs/screenshots/06-ai-autofilled-listing.png"
+          alt="AI auto-filled eBay listing — ING Listing Engine">
+      </div>
+      <div class="ingle-grid-item">
+        <img
+          src="https://raw.githubusercontent.com/essquireo0o/ING-eBay-Autolister/main/docs/screenshots/07-item-specifics-autofill.png"
+          alt="eBay item specifics autofill — ING Listing Engine">
+      </div>
+      <div class="ingle-grid-item">
+        <img
+          src="https://raw.githubusercontent.com/essquireo0o/ING-eBay-Autolister/main/docs/screenshots/04-url-product-import.png"
+          alt="Product URL import — ING Listing Engine">
+      </div>
+      <div class="ingle-grid-item">
+        <img
+          src="https://raw.githubusercontent.com/essquireo0o/ING-eBay-Autolister/main/docs/screenshots/09-publish-ready-listing.png"
+          alt="Publish-ready eBay listing — ING Listing Engine">
+      </div>
+    </div>
+
+    <!-- Feature chips -->
+    <div class="ingle-chips">
+      <span class="ingle-chip">✓ Paste URL → AI fills 20+ fields</span>
+      <span class="ingle-chip">✓ Bulk import entire collections</span>
+      <span class="ingle-chip">✓ Built-in photo editor</span>
+      <span class="ingle-chip">✓ Publishes via official eBay API</span>
+    </div>
+
+    <!-- CTAs -->
+    <div class="ingle-ctas">
+      <div class="ingle-cta-row">
+        <a href="https://github.com/essquireo0o/ING-eBay-Autolister/releases/latest"
+           class="ingle-btn-dl" download>
+          ⬇ Free Download — Windows
+        </a>
+        <a href="https://ingmining.com/listing-engine-demo/"
+           class="ingle-btn-demo">
+          View Full Demo &amp; Screenshots →
+        </a>
+      </div>
+      <p class="ingle-meta">
+        Windows 10/11 &nbsp;·&nbsp; No install required &nbsp;·&nbsp; No subscription &nbsp;·&nbsp; Freeware
+      </p>
+    </div>
+
+  </div>
+</div>

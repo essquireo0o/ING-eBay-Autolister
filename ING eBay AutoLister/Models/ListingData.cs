@@ -83,6 +83,28 @@ public class AnalyzeRequest
 
 public class AnalyzeUrlRequest { public string Url { get; set; } = ""; }
 
+public class QuickFillRequest { public string ItemName { get; set; } = ""; }
+
+public class SoldComp
+{
+    public string Title { get; set; } = "";
+    public decimal Price { get; set; }
+    public DateTime SoldDate { get; set; }
+    public string Url { get; set; } = "";
+    public string ImageUrl { get; set; } = "";
+}
+
+public class SoldCompsResult
+{
+    public string Query { get; set; } = "";
+    public List<SoldComp> Items { get; set; } = [];
+    public int Count { get; set; }
+    public decimal Average { get; set; }
+    public decimal Median { get; set; }
+    public decimal Min { get; set; }
+    public decimal Max { get; set; }
+}
+
 public class GeneratePhotosRequest
 {
     public string Title { get; set; } = "";
@@ -142,3 +164,14 @@ public class UpdateListingRequest : PostListingRequest
 }
 
 public class ImproveSeoRequest : ListingData { }
+
+public class ModifyListingRequest : ListingData
+{
+    public string Instruction { get; set; } = "";
+}
+
+public class SniperBidRequest
+{
+    public string  ItemId  { get; set; } = "";
+    public decimal MaxBid  { get; set; }
+}

@@ -5,6 +5,8 @@ using Anthropic.SDK.Messaging;
 using ING_eBay_AutoLister.Models;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+// Alias to avoid ambiguity with System.Windows.Forms.Message (pulled in by UseWindowsForms)
+using Message = Anthropic.SDK.Messaging.Message;
 
 namespace ING_eBay_AutoLister.Services;
 
@@ -282,6 +284,85 @@ public class ClaudeService(CredentialsStore creds)
         return DeserializeListing(text);
     }
 
+    // ── Item name only → full listing (quick-fill) ──────────────────────────
+
+    public async Task<ListingData> AnalyzeProductNameAsync(string itemName, string? imageBase64, string? imageMimeType)
+    {
+        var contentBlocks = new List<ContentBase>();
+
+        if (!string.IsNullOrWhiteSpace(imageBase64))
+        {
+            contentBlocks.Add(new ImageContent
+            {
+                Source = new ImageSource
+                {
+                    MediaType = imageMimeType ?? "image/jpeg",
+                    Data      = imageBase64
+                }
+            });
+        }
+
+        contentBlocks.Add(new TextContent
+        {
+            Text = $"""
+                You are an expert eBay seller and SEO specialist with 10+ years of experience.
+                The seller only typed a product name — there is no source page to read. Use your own
+                knowledge of this product to generate a complete, professional, SEO-optimized eBay listing.
+
+                PRODUCT NAME (as typed by the seller):
+                "{itemName}"
+
+                {(!string.IsNullOrWhiteSpace(imageBase64)
+                    ? "A reference photo found online for this product is also attached above — use it to confirm what the product actually looks like and to write VisualDescription."
+                    : "No reference photo is available — rely on your own knowledge of this product.")}
+
+                TITLE RULES (critical — search ranking depends on this):
+                - Max 80 characters exactly — eBay truncates longer titles
+                - Lead with the most searchable terms: Brand + Model + Item Type
+                - Include key attributes buyers search: compatibility, specs, accessories included
+                - No ALL CAPS, no spammy punctuation (!!! or ***), no filler words like "Nice" or "Look"
+                - Count the characters before returning — stay under 80
+
+                SEO SUBTITLE (optional, 55 chars max):
+                - Use for a second sales hook or trust signal: "US Seller | Tested | Fast Ship"
+                - Leave empty string if nothing meaningful to add
+
+                {HtmlTemplateInstructions}
+
+                ITEM SPECIFICS:
+                - Include every applicable specific for the category — buyers filter by these
+                - For electronics: Brand, Model, MPN, Color, Connectivity, Compatible Devices, Storage, RAM, OS
+                - For clothing: Brand, Size, Color, Material, Department, Style
+                - For collectibles: Brand, Year, Theme, Character, Set
+                - Keep every value to 4 words or fewer — no sentences, no comma-separated lists
+
+                PRICING:
+                - Set Price to a realistic current eBay resale price for this exact product
+                - Enable Best Offer for used/collectible items
+
+                {ListingSchema}
+
+                IMPORTANT — leave "ImageUrls" as an empty array. Photos are supplied separately by the app.
+                """
+        });
+
+        var messages = new List<Message>
+        {
+            new() { Role = RoleType.User, Content = contentBlocks }
+        };
+
+        var response = await BuildClient().Messages.GetClaudeMessageAsync(new MessageParameters
+        {
+            Model     = "claude-opus-4-8",
+            MaxTokens = 8192,
+            Messages  = messages,
+            Thinking  = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.high }
+        });
+
+        var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";
+        return DeserializeListing(text);
+    }
+
     // ── SEO improvement pass ─────────────────────────────────────────────────
 
     public async Task<ListingData> ImproveSeoAsync(ImproveSeoRequest req)
@@ -350,6 +431,56 @@ public class ClaudeService(CredentialsStore creds)
         improved.ImageUrls                = req.ImageUrls.Count > 0 ? req.ImageUrls : improved.ImageUrls;
 
         return improved;
+    }
+
+    // ── Natural language modification of current listing ────────────────────
+
+    public async Task<ListingData> ModifyListingAsync(ModifyListingRequest req)
+    {
+        var currentJson = System.Text.Json.JsonSerializer.Serialize(req, new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+
+        var prompt = $"""
+            You are an expert eBay seller. The user has a listing draft and wants to modify it with a natural language instruction.
+
+            CURRENT LISTING (JSON):
+            {currentJson}
+
+            USER INSTRUCTION:
+            "{req.Instruction}"
+
+            Apply the instruction to produce an updated listing. Rules:
+            - Only change the fields the instruction targets — preserve everything else exactly as-is
+            - Title must remain ≤ 80 characters
+            - Subtitle must remain ≤ 55 characters (leave as empty string if not meaningful)
+            - Condition must be one of: NEW, LIKE_NEW, USED_EXCELLENT, USED_VERY_GOOD, USED_GOOD, USED_ACCEPTABLE, FOR_PARTS_OR_NOT_WORKING
+            - Description must remain valid HTML (preserve the HTML structure — do not convert to plain text)
+            - Price must be a positive number
+            - Keep ItemSpecifics values ≤ 4 words each
+            - If the instruction is ambiguous, make the most reasonable interpretation
+
+            {ListingSchema}
+            """;
+
+        var messages = new List<Message>
+        {
+            new() { Role = RoleType.User, Content = [ new TextContent { Text = prompt } ] }
+        };
+
+        var response = await BuildClient().Messages.GetClaudeMessageAsync(new MessageParameters
+        {
+            Model     = "claude-opus-4-8",
+            MaxTokens = 8192,
+            Messages  = messages,
+            Thinking  = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.low }
+        });
+
+        var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";
+        var modified = DeserializeListing(text);
+
+        // Always preserve photos — the instruction never touches those
+        modified.ImageUrls = req.ImageUrls?.Count > 0 ? req.ImageUrls : modified.ImageUrls;
+
+        return modified;
     }
 
     // ── Deserialization helpers ──────────────────────────────────────────────

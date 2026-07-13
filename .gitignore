@@ -3,6 +3,7 @@ credentials.json
 *.env
 .env*
 secrets.json
+ingmining-server/ebay-config.php
 
 # ── Build output ─────────────────────────────────────────────────
 bin/
