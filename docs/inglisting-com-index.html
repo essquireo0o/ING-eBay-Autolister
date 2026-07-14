@@ -451,6 +451,35 @@ a:hover { text-decoration: underline; }
 .feature-card p  { font-size: 13px; color: var(--text2); line-height: 1.6; }
 
 /* ═══════════════════════════════════════════════════════════
+   WHAT'S NEW
+═══════════════════════════════════════════════════════════ */
+.whatsnew-section { background: var(--bg); }
+.whatsnew-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+.whatsnew-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  transition: all .2s;
+}
+.whatsnew-card:hover {
+  border-color: rgba(255,195,0,.3);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 48px rgba(0,0,0,.4);
+}
+.whatsnew-shot {
+  background: #0b1422;
+  border-bottom: 1px solid var(--border);
+}
+.whatsnew-shot img { width: 100%; display: block; }
+.whatsnew-card h3 { font-size: 16px; font-weight: 700; margin: 18px 22px 8px; color: #fff; }
+.whatsnew-card p  { font-size: 13px; color: var(--text2); line-height: 1.6; margin: 0 22px 22px; }
+
+/* ═══════════════════════════════════════════════════════════
    COMPARE TABLE
 ═══════════════════════════════════════════════════════════ */
 .compare-section { background: var(--bg); }
@@ -607,6 +636,8 @@ td.gold { color: var(--gold); font-weight: 700; }
   </a>
   <div class="topnav-links">
     <a href="#demo" class="nav-link">Screenshots</a>
+    <a href="#whats-new" class="nav-link">What's New</a>
+    <a href="/blog" class="nav-link">Blog</a>
     <a href="#faq" class="nav-link">FAQ</a>
     <a href="https://ingmining.com" class="nav-link">ING Mining ↗</a>
     <a href="https://github.com/essquireo0o/ING-eBay-Autolister/releases/latest" class="nav-dl" download>⬇ Free Download</a>
@@ -897,6 +928,39 @@ td.gold { color: var(--gold); font-weight: 700; }
         <div class="feat-icon">🚀</div>
         <h3>Direct eBay Publishing</h3>
         <p>One click publishes your listing live to eBay via the official Sell API — no copy-pasting into Seller Hub.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────────── WHAT'S NEW ──────────────────── -->
+<section class="section whatsnew-section" id="whats-new">
+  <div class="section-inner">
+    <div class="section-label">Just Shipped</div>
+    <h2 class="section-title">What's new.</h2>
+    <p class="section-sub">Fresh out of active development — real screenshots from the current build.</p>
+
+    <div class="whatsnew-grid">
+      <div class="whatsnew-card">
+        <div class="whatsnew-shot">
+          <img src="assets/13-ai-quickfill-live.png" alt="AI quick-fill pulling a real product photo, title, and category automatically" loading="lazy">
+        </div>
+        <h3>Type a name — AI does the rest</h3>
+        <p>The new Quick-Fill box researches a product by name alone: finds a photo, writes a keyword-optimized title, and picks the eBay category automatically, with sold-comp research linked right alongside it.</p>
+      </div>
+      <div class="whatsnew-card">
+        <div class="whatsnew-shot">
+          <img src="assets/14-opportunity-finder.png" alt="New Opportunity Finder page with six market research sections" loading="lazy">
+        </div>
+        <h3>Opportunity Finder</h3>
+        <p>A new dedicated page surfacing what's worth listing next: high sell-through categories, low-competition niches, underpriced auctions, title trends, pricing recommendations, and seasonal demand — rolling out section by section.</p>
+      </div>
+      <div class="whatsnew-card">
+        <div class="whatsnew-shot">
+          <img src="assets/12-dashboard-connected.png" alt="Dashboard showing a live connected eBay account with real listings" loading="lazy">
+        </div>
+        <h3>Built on a real, connected store</h3>
+        <p>This isn't a mockup — that's a live dashboard pulling real inventory and catalog value straight from a connected eBay seller account via the official Sell API.</p>
       </div>
     </div>
   </div>

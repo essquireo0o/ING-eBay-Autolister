@@ -103,6 +103,77 @@ public class SoldCompsResult
     public decimal Median { get; set; }
     public decimal Min { get; set; }
     public decimal Max { get; set; }
+    public decimal? SellThroughPercent { get; set; }
+    public decimal AvgShipping { get; set; }
+}
+
+public class EbayOpportunityItem
+{
+    public string Title { get; set; } = "";
+    public decimal Price { get; set; }
+    public decimal ShippingCost { get; set; }
+    public string Url { get; set; } = "";
+    public string ImageUrl { get; set; } = "";
+    public DateTime? EndDate { get; set; }
+    public string SellerUsername { get; set; } = "";
+    public int SellerFeedbackScore { get; set; }
+    public string BuyingOption { get; set; } = "";
+    public int BidCount { get; set; }
+}
+
+// Mutable (not anonymous) so the top-candidate Terapeak re-check can overwrite profit fields
+// in place after the initial broad-estimate pass.
+public class OpportunityListItem
+{
+    public string Title { get; set; } = "";
+    public decimal Price { get; set; }
+    public decimal ShippingCost { get; set; }
+    public decimal TotalCost { get; set; }
+    public string Url { get; set; } = "";
+    public string ImageUrl { get; set; } = "";
+    public DateTime? EndDate { get; set; }
+    public string SellerUsername { get; set; } = "";
+    public int SellerFeedbackScore { get; set; }
+    public string BuyingOption { get; set; } = "";
+    public int BidCount { get; set; }
+    public decimal? MarketAverage { get; set; }
+    public decimal? EstimatedResalePrice { get; set; }
+    public decimal? EstimatedProfit { get; set; }
+    public decimal? ProfitPercent { get; set; }
+    public int? OpportunityScore { get; set; }
+    public bool IsVerified { get; set; }
+    public bool IsUnderpriced { get; set; }
+    public bool IsHighProfitMargin { get; set; }
+    public bool IsEndingSoon { get; set; }
+    public bool IsHighDemand { get; set; }
+    public bool IsNewlyListed { get; set; }
+    public bool HasPoorTitle { get; set; }
+    public bool HasMisspelledTitle { get; set; }
+    public bool HasPoorPhoto { get; set; }
+}
+
+// Return shape of the shared opportunity-search pipeline (Program.cs FindOpportunitiesAsync),
+// used by both the interactive /api/opportunities/search endpoint and the Gem Radar background
+// scanner so the two don't duplicate the search/score/verify logic.
+public class OpportunitySearchResult
+{
+    public string Query { get; set; } = "";
+    public decimal MarketValue { get; set; }
+    public decimal AveragePrice { get; set; }
+    public string SoldSource { get; set; } = "none";
+    public string ListingType { get; set; } = "AUCTION";
+    public decimal? SellThroughPercent { get; set; }
+    public List<OpportunityListItem> Items { get; set; } = [];
+}
+
+// A single Gem Radar find, persisted by GemRadarStore. Wraps the same OpportunityListItem the
+// interactive search returns, plus the category keyword that surfaced it and when it was found,
+// so the passive feed doesn't require the user to have typed anything themselves.
+public class GemEntry
+{
+    public string Category { get; set; } = "";
+    public DateTime FoundAtUtc { get; set; }
+    public OpportunityListItem Item { get; set; } = new();
 }
 
 public class GeneratePhotosRequest

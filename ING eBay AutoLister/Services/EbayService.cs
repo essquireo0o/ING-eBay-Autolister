@@ -189,14 +189,35 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
     }
 
     // ── Application (client_credentials) token — for Buy APIs that don't need a user login ──
+    // NOTE: eBay grants client_credentials tokens all-or-nothing per requested scope string — if
+    // any single scope isn't approved for the app, the ENTIRE token request fails. Marketplace
+    // Insights requires special approval most dev accounts don't have, so it gets its own token
+    // request/cache, separate from the base Buy API scope that Browse search always has access to.
 
     private string? _appToken;
     private DateTimeOffset _appTokenExpiry;
 
-    private async Task<string> GetApplicationTokenAsync()
+    private async Task<string> GetApplicationTokenAsync() =>
+        await RequestApplicationTokenAsync(
+            "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.marketplace.insights",
+            () => _appToken, () => _appTokenExpiry,
+            (t, e) => { _appToken = t; _appTokenExpiry = e; });
+
+    private string? _browseAppToken;
+    private DateTimeOffset _browseAppTokenExpiry;
+
+    private async Task<string> GetBrowseApplicationTokenAsync() =>
+        await RequestApplicationTokenAsync(
+            "https://api.ebay.com/oauth/api_scope",
+            () => _browseAppToken, () => _browseAppTokenExpiry,
+            (t, e) => { _browseAppToken = t; _browseAppTokenExpiry = e; });
+
+    private async Task<string> RequestApplicationTokenAsync(
+        string scope, Func<string?> getCached, Func<DateTimeOffset> getExpiry, Action<string, DateTimeOffset> setCached)
     {
-        if (!string.IsNullOrWhiteSpace(_appToken) && DateTimeOffset.UtcNow < _appTokenExpiry)
-            return _appToken;
+        var cached = getCached();
+        if (!string.IsNullOrWhiteSpace(cached) && DateTimeOffset.UtcNow < getExpiry())
+            return cached;
 
         var c = creds.Get();
         if (string.IsNullOrWhiteSpace(c.EbayClientId) || string.IsNullOrWhiteSpace(c.EbayClientSecret))
@@ -209,7 +230,7 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
 
         var body = new FormUrlEncodedContent([
             new("grant_type", "client_credentials"),
-            new("scope", "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.marketplace.insights")
+            new("scope", scope)
         ]);
 
         var response = await client.PostAsync(TokenUrl, body);
@@ -221,12 +242,18 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         var accessToken = doc.RootElement.GetProperty("access_token").GetString() ?? "";
         var expiresIn   = doc.RootElement.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
 
-        _appToken = accessToken;
-        _appTokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expiresIn - 60);
+        setCached(accessToken, DateTimeOffset.UtcNow.AddSeconds(expiresIn - 60));
         return accessToken;
     }
 
     // ── Recently-sold comps (Marketplace Insights API — last 90 days) ────────
+
+    // eBay's q= param matches each word independently, in any order, anywhere in the title —
+    // "graphics card" un-quoted also matches "Vintage Business Cards ... Graphic..." or
+    // "... Safety Card ... Graphics". Quoting forces it to require the phrase together, which
+    // is what eBay's own site does by default under its relevance-ranked "Best Match" sort.
+    private static string QuotePhrase(string term) =>
+        term.Contains(' ') ? $"\"{term.Replace("\"", "")}\"" : term;
 
     public async Task<SoldCompsResult> SearchSoldCompsAsync(string query, int daysBack = 60)
     {
@@ -236,7 +263,7 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         client.DefaultRequestHeaders.Add("X-EBAY-C-MARKETPLACE-ID", "EBAY_US");
 
         var url = "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search" +
-                   $"?q={Uri.EscapeDataString(query)}&limit=50";
+                   $"?q={Uri.EscapeDataString(QuotePhrase(query))}&limit=50";
 
         var response = await client.GetAsync(url);
         var responseBody = await response.Content.ReadAsStringAsync();
@@ -281,6 +308,122 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         }
 
         return result;
+    }
+
+    // ── Live listings ending soon (Browse API — public search, no special approval needed) ──
+
+    public async Task<List<EbayOpportunityItem>> SearchEndingSoonAsync(
+        string query, int minFeedback = 0, int limit = 50, string? category = null,
+        string? condition = null, decimal? minPrice = null, decimal? maxPrice = null, string listingType = "AUCTION")
+    {
+        var token = await GetBrowseApplicationTokenAsync();
+        var client = httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        client.DefaultRequestHeaders.Add("X-EBAY-C-MARKETPLACE-ID", "EBAY_US");
+
+        // Auctions sort by soonest-ending (the whole "flip before it ends" premise); fixed-price
+        // listings have no meaningful end time, so mixing them in switches sort to newly listed.
+        var buyingOptions = listingType switch
+        {
+            "FIXED_PRICE" => "FIXED_PRICE",
+            "BOTH"        => "AUCTION|FIXED_PRICE",
+            _             => "AUCTION"
+        };
+        var sort = listingType == "AUCTION" ? "endingSoonest" : "newlyListed";
+
+        var filters = new List<string> { $"buyingOptions:{{{buyingOptions}}}" };
+
+        var conditionIds = condition?.ToUpperInvariant() switch
+        {
+            "NEW"         => "1000|1500",
+            "USED"        => "3000|4000|5000|6000",
+            "REFURBISHED" => "2000|2500",
+            "FOR_PARTS"   => "7000",
+            _             => null
+        };
+        if (conditionIds is not null)
+            filters.Add($"conditionIds:{{{conditionIds}}}");
+
+        if (minPrice.HasValue || maxPrice.HasValue)
+        {
+            var lo = minPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            var hi = maxPrice?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            filters.Add($"price:[{lo}..{hi}]");
+            filters.Add("priceCurrency:USD");
+        }
+
+        // No real category taxonomy lookup — folding it into the free-text query is good enough
+        // to narrow results without a separate eBay Taxonomy API integration.
+        var q = string.IsNullOrWhiteSpace(category) ? QuotePhrase(query) : $"{QuotePhrase(query)} {QuotePhrase(category)}";
+
+        var url = "https://api.ebay.com/buy/browse/v1/item_summary/search" +
+                   $"?q={Uri.EscapeDataString(q)}&filter={Uri.EscapeDataString(string.Join(",", filters))}&sort={sort}&limit={limit}";
+
+        var response = await client.GetAsync(url);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"eBay listing search failed (HTTP {(int)response.StatusCode}): {body}");
+
+        var items = new List<EbayOpportunityItem>();
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("itemSummaries", out var summaries))
+            return items;
+
+        foreach (var item in summaries.EnumerateArray())
+        {
+            var seller = item.TryGetProperty("seller", out var s) ? s : default;
+            var feedbackScore = seller.ValueKind == JsonValueKind.Object &&
+                                 seller.TryGetProperty("feedbackScore", out var fs) &&
+                                 fs.TryGetInt32(out var fsVal) ? fsVal : 0;
+            if (feedbackScore < minFeedback) continue;
+
+            // Auction items with no bids yet often have no "price" — the real current price
+            // lives in currentBidPrice instead. Fall back to that so $0 doesn't show for them.
+            var price = item.TryGetProperty("price", out var p) &&
+                        p.TryGetProperty("value", out var pv) &&
+                        decimal.TryParse(pv.GetString(), out var priceVal) ? priceVal : 0;
+            if (price == 0 && item.TryGetProperty("currentBidPrice", out var cbp) &&
+                cbp.TryGetProperty("value", out var cbv) &&
+                decimal.TryParse(cbv.GetString(), out var cbVal))
+                price = cbVal;
+
+            DateTime? endDate = item.TryGetProperty("itemEndDate", out var ed) &&
+                                DateTimeOffset.TryParse(ed.GetString(), out var edVal)
+                                ? edVal.UtcDateTime : null;
+
+            // Cheapest shipping option's cost — used to compare buyer's real total cost
+            // (price + shipping) against sold comps, not just the listed price alone.
+            var shippingCost = 0m;
+            if (item.TryGetProperty("shippingOptions", out var shipOpts) && shipOpts.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var opt in shipOpts.EnumerateArray())
+                {
+                    if (opt.TryGetProperty("shippingCost", out var sc) &&
+                        sc.TryGetProperty("value", out var scv) &&
+                        decimal.TryParse(scv.GetString(), out var scVal))
+                    {
+                        shippingCost = scVal;
+                        break;
+                    }
+                }
+            }
+
+            items.Add(new EbayOpportunityItem
+            {
+                Title               = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                Price               = price,
+                ShippingCost        = shippingCost,
+                Url                 = item.TryGetProperty("itemWebUrl", out var u) ? u.GetString() ?? "" : "",
+                ImageUrl            = item.TryGetProperty("image", out var img) && img.TryGetProperty("imageUrl", out var iu) ? iu.GetString() ?? "" : "",
+                EndDate             = endDate,
+                SellerUsername      = seller.ValueKind == JsonValueKind.Object && seller.TryGetProperty("username", out var un) ? un.GetString() ?? "" : "",
+                SellerFeedbackScore = feedbackScore,
+                BuyingOption        = item.TryGetProperty("buyingOptions", out var bo) && bo.GetArrayLength() > 0 ? bo[0].GetString() ?? "" : "",
+                BidCount            = item.TryGetProperty("bidCount", out var bc) && bc.TryGetInt32(out var bcVal) ? bcVal : 0,
+            });
+        }
+
+        return items;
     }
 
     public async Task ProactiveTokenRefreshAsync()

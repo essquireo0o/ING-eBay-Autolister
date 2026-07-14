@@ -24,7 +24,8 @@
         <button class="nav-item" type="button" data-page="activity"><span class="nav-icon">📋</span>Activity</button>
         <button class="nav-item" type="button" data-page="logs"><span class="nav-icon">🔍</span>Logs</button>
         <button class="nav-item" type="button" data-page="settings"><span class="nav-icon">⚙️</span>Settings</button>
-        <button class="nav-item" type="button" data-page="sniper"><span class="nav-icon">🎯</span>eBay Sniper</button>
+        <button class="nav-item" type="button" data-page="opportunity"><span class="nav-icon">🔍</span>Opportunity Finder</button>
+        <button class="nav-item" type="button" data-page="gems"><span class="nav-icon">💎</span>Gem Radar<span class="nav-pro-badge">PRO</span></button>
         <button class="nav-item nav-license" id="nav-license-btn" type="button" data-page="license"><span class="nav-icon">🔑</span>License<span id="nav-license-dot" class="nav-license-dot dot-off"></span></button>
       </nav>
       <div class="sidebar-footer">
@@ -229,6 +230,7 @@
               <button id="nl-load-all-drafts-btn" class="nl-load-all-drafts-btn" type="button" title="Load all saved drafts as tabs">Open All Drafts</button>
               <button id="nl-clear-drafts-btn" class="nl-clear-drafts-btn" type="button" title="Delete all saved drafts and clear all tabs">Clear All</button>
             </div>
+            <button id="nl-home" class="nl-close-btn nl-home-btn" type="button" title="Back to Home">🏠</button>
             <button id="nl-close" class="nl-close-btn" type="button" title="Close">✕</button>
           </div>
 
@@ -669,56 +671,152 @@
 
       </section>
 
-      <!-- ── eBay Sniper ─────────────────────────────────────────── -->
-      <section id="sniper-section" class="panel hidden">
-        <div class="panel-header">
-          <div>
-            <h2>🎯 eBay Sniper</h2>
-            <p style="font-size:13px;color:var(--muted);margin-top:2px">Track auctions and auto-bid in the final seconds to win at the lowest price.</p>
+      <!-- ── Opportunity Finder (full-page overlay, like AI Listing) ── -->
+      <section id="opportunity-section" class="opportunity-overlay hidden">
+        <div class="opportunity-overlay-header">
+          <div class="opportunity-overlay-header-left">
+            <button id="opp-home" class="nl-close-btn nl-home-btn" type="button" title="Back to Home">🏠</button>
+            <div>
+              <div class="eyebrow">Opportunity Finder</div>
+              <h2>🔍 Surface What's Worth Listing Next</h2>
+            </div>
           </div>
-          <button id="btn-sniper-add" class="btn btn-primary" type="button">+ Add Auction</button>
+          <div class="opportunity-overlay-header-actions">
+            <button id="opp-close" class="nl-close-btn" type="button" title="Close">✕</button>
+          </div>
         </div>
 
-        <!-- Add auction form -->
-        <div id="sniper-add-form" class="hidden" style="background:#1e2330;border:1px solid #2d3748;border-radius:12px;padding:20px 24px;margin-bottom:20px">
-          <h3 style="margin-bottom:16px;font-size:15px">Track New Auction</h3>
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
-            <div>
-              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">eBay Item URL or Item ID</label>
-              <input id="sniper-url-input" type="text" placeholder="https://www.ebay.com/itm/123456789 or 123456789" style="width:100%;padding:9px 12px;border:1px solid #374151;border-radius:8px;background:#0f1117;color:#e2e8f0;font-size:13px" />
+        <div class="opportunity-overlay-body">
+          <div id="opp-terapeak-banner" class="opp-terapeak-banner">
+            <span class="opp-terapeak-icon">🔗</span>
+            <span id="opp-terapeak-status" class="opp-terapeak-status">Checking Terapeak connection…</span>
+            <button id="opp-terapeak-connect" class="btn btn-primary hidden" type="button">Connect Terapeak</button>
+            <button id="opp-terapeak-disconnect" class="btn btn-secondary hidden" type="button">Disconnect</button>
+          </div>
+
+          <div class="opp-search-row">
+            <div class="opp-field opp-field-keyword">
+              <label for="opp-search-input">Keyword</label>
+              <input id="opp-search-input" type="text" placeholder="Search a keyword or product name…" />
             </div>
-            <div>
-              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:5px">Your Max Bid (USD)</label>
-              <input id="sniper-bid-input" type="number" min="0.01" step="0.01" placeholder="e.g. 125.00" style="width:100%;padding:9px 12px;border:1px solid #374151;border-radius:8px;background:#0f1117;color:#e2e8f0;font-size:13px" />
+            <div class="opp-field">
+              <label for="opp-category-input">Category</label>
+              <input id="opp-category-input" type="text" placeholder="e.g. Video Games" />
             </div>
-            <div style="display:flex;gap:8px">
-              <button id="btn-sniper-submit" class="btn btn-primary" type="button">Track It</button>
-              <button id="btn-sniper-cancel" class="btn btn-ghost" type="button">Cancel</button>
+            <div class="opp-field">
+              <label for="opp-condition-select">Condition</label>
+              <select id="opp-condition-select">
+                <option value="">Any</option>
+                <option value="NEW">New</option>
+                <option value="USED">Used</option>
+                <option value="REFURBISHED">Refurbished</option>
+                <option value="FOR_PARTS">For Parts</option>
+              </select>
+            </div>
+            <div class="opp-field opp-field-price">
+              <label for="opp-min-price-input">Min Price</label>
+              <input id="opp-min-price-input" type="number" min="0" step="0.01" placeholder="Any" />
+            </div>
+            <div class="opp-field opp-field-price">
+              <label for="opp-max-price-input">Max Price</label>
+              <input id="opp-max-price-input" type="number" min="0" step="0.01" placeholder="Any" />
+            </div>
+            <div class="opp-field">
+              <label for="opp-listing-type-select">Listing Type</label>
+              <select id="opp-listing-type-select">
+                <option value="AUCTION">Auction</option>
+                <option value="FIXED_PRICE">Fixed Price</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </div>
+            <button id="opp-find-btn" class="btn btn-primary opp-search-submit" type="button">🔍 Search</button>
+          </div>
+
+          <p class="opp-hint">AI cross-references live auctions ending soon against recent sold prices for the same keyword — surfacing high-demand items priced well below where they typically sell.</p>
+
+          <div id="opp-results" class="opp-results hidden">
+            <div id="opp-stats-grid" class="opp-stats-grid"></div>
+
+            <div class="opp-results-layout">
+              <aside class="opp-filters-panel">
+                <h4>Filters</h4>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-underpriced" /> Underpriced only</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-ending-soon" /> Auctions ending soon</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-poor-titles" /> Poor titles</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-misspelled" /> Misspelled titles</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-poor-photos" /> Poor photos</label>
+                <label class="opp-filter-chip opp-filter-disabled" title="Coming soon"><input type="checkbox" disabled /> Low competition</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-high-demand" /> High demand</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-high-profit" /> High profit margin</label>
+                <label class="opp-filter-chip"><input type="checkbox" id="opp-filter-newly-listed" /> Newly listed</label>
+                <label class="opp-filter-chip opp-filter-disabled" title="Coming soon"><input type="checkbox" disabled /> Price drops</label>
+              </aside>
+
+              <div class="opp-results-main">
+                <div id="opp-results-summary" class="opp-results-summary"></div>
+                <div id="opp-results-list" class="opp-results-list"></div>
+              </div>
             </div>
           </div>
-          <p style="font-size:11px;color:#64748b;margin-top:10px">⏱ Bid is placed automatically 8 seconds before the auction ends. You must be logged into eBay in this app.</p>
+
+          <div class="opportunity-grid">
+          <div class="opportunity-card">
+            <h3>📈 High Sell-Through</h3>
+            <p class="opportunity-empty">Coming soon — categories and items selling fastest relative to how many are listed.</p>
+          </div>
+          <div class="opportunity-card">
+            <h3>🧭 Low Competition</h3>
+            <p class="opportunity-empty">Coming soon — in-demand items with few active sellers.</p>
+          </div>
+          <div class="opportunity-card">
+            <h3>💰 Underpriced Auctions</h3>
+            <p class="opportunity-empty">Coming soon — live auctions trending below recent sold comps.</p>
+          </div>
+          <div class="opportunity-card">
+            <h3>🏷️ Title Trends</h3>
+            <p class="opportunity-empty">Coming soon — keywords and phrasing driving the most search traffic right now.</p>
+          </div>
+          <div class="opportunity-card">
+            <h3>🎯 Pricing Recommendations</h3>
+            <p class="opportunity-empty">Coming soon — suggested price adjustments for your active listings.</p>
+          </div>
+          <div class="opportunity-card">
+            <h3>🍂 Seasonal Demand</h3>
+            <p class="opportunity-empty">Coming soon — categories about to trend up or down with the season.</p>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Gem Radar (Pro, full-page overlay) ── -->
+      <section id="gems-section" class="opportunity-overlay hidden">
+        <div class="opportunity-overlay-header">
+          <div class="opportunity-overlay-header-left">
+            <button id="gems-home" class="nl-close-btn nl-home-btn" type="button" title="Back to Home">🏠</button>
+            <div>
+              <div class="eyebrow">Gem Radar <span class="nav-pro-badge">PRO</span></div>
+              <h2>💎 Flips Found While You Weren't Looking</h2>
+            </div>
+          </div>
+          <div class="opportunity-overlay-header-actions">
+            <button id="gems-close" class="nl-close-btn" type="button" title="Close">✕</button>
+          </div>
         </div>
 
-        <!-- Snipes table -->
-        <div id="sniper-list-wrap">
-          <div id="sniper-empty" style="text-align:center;padding:60px 20px;color:#4b5563">
-            <div style="font-size:40px;margin-bottom:12px">🎯</div>
-            <div style="font-size:15px;font-weight:600;margin-bottom:6px">No auctions tracked yet</div>
-            <div style="font-size:13px">Click <strong>+ Add Auction</strong> and paste an eBay auction URL to get started.</div>
+        <div class="opportunity-overlay-body">
+          <p class="opp-hint">Runs continuously in the background across a rotating list of categories, cross-referencing real Terapeak sold comps — no keyword required. New gems appear here as the scanner finds them.</p>
+
+          <div id="gems-locked" class="gems-locked hidden">
+            <div class="gems-locked-icon">🔒</div>
+            <h3>Gem Radar is a Pro feature</h3>
+            <p>Upgrade to let the background scanner surface underpriced listings for you, across every category, all the time — not just when you remember to search.</p>
+            <button id="gems-upgrade-btn" class="btn btn-primary" type="button">See Pro Plans</button>
           </div>
-          <table id="sniper-table" class="hidden" style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr style="border-bottom:1px solid #2d3748;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.05em">
-                <th style="padding:10px 12px;text-align:left;font-weight:600">Item</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:600">Ends</th>
-                <th style="padding:10px 12px;text-align:right;font-weight:600">Current Bid</th>
-                <th style="padding:10px 12px;text-align:right;font-weight:600">Your Max</th>
-                <th style="padding:10px 12px;text-align:center;font-weight:600">Status</th>
-                <th style="padding:10px 12px;text-align:center;font-weight:600"></th>
-              </tr>
-            </thead>
-            <tbody id="sniper-tbody"></tbody>
-          </table>
+
+          <div id="gems-content">
+            <div id="gems-status" class="opp-results-summary"></div>
+            <div id="gems-list" class="opp-results-list"></div>
+          </div>
         </div>
       </section>
 

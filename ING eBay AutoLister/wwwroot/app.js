@@ -24,8 +24,10 @@
     bindSetup();
     bindNewListingModal();
     bindImageGenSetup();
-    bindSniper();
     bindPgImggen();
+    bindOpportunitySearch();
+    bindGemsSection();
+    bindHomeButtons();
     bindForm();
     restoreListingViewMode();
     addActivity('ING Listing Engine™ ready', 'Official product of ING Mining LLC — all systems operational.');
@@ -79,6 +81,8 @@
   function handleNav(page) {
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === page));
     if (page !== 'ai') $('new-listing-overlay')?.classList.add('hidden');
+    if (page !== 'opportunity') $('opportunity-section')?.classList.add('hidden');
+    if (page !== 'gems') $('gems-section')?.classList.add('hidden');
     if (page === 'ai') {
       showAiSection();
       return;
@@ -95,8 +99,12 @@
       showLicenseSection();
       return;
     }
-    if (page === 'sniper') {
-      showSniperSection();
+    if (page === 'opportunity') {
+      showOpportunitySection();
+      return;
+    }
+    if (page === 'gems') {
+      showGemsSection();
       return;
     }
     showDashboard();
@@ -108,7 +116,7 @@
     openNewListingModal();
   }
 
-  const OVERLAY_SECTIONS = ['settings-section', 'logs-section', 'license-section', 'sniper-section'];
+  const OVERLAY_SECTIONS = ['settings-section', 'logs-section', 'license-section', 'opportunity-section', 'gems-section'];
 
   function hideOverlaySections() {
     OVERLAY_SECTIONS.forEach(id => $(id)?.classList.add('hidden'));
@@ -129,40 +137,52 @@
     await loadTerapeakStatus();
   }
 
-  async function loadTerapeakStatus() {
-    const statusEl       = $('pg-terapeak-status');
-    const connectBtn     = $('pg-terapeak-connect');
-    const disconnectBtn  = $('pg-terapeak-disconnect');
-    if (!statusEl || !connectBtn || !disconnectBtn) return;
+  const TERAPEAK_BANNERS = [
+    ['pg-terapeak-status', 'pg-terapeak-connect', 'pg-terapeak-disconnect'],
+    ['opp-terapeak-status', 'opp-terapeak-connect', 'opp-terapeak-disconnect'],
+  ];
 
-    try {
-      const data = await fetch('/api/terapeak/status').then(r => r.json());
-      if (data.loginInProgress) {
-        statusEl.textContent = 'Browser window open — log into eBay there, then come back here.';
-        connectBtn.disabled = true;
-        disconnectBtn.classList.add('hidden');
-      } else if (data.connected) {
-        statusEl.textContent = 'Connected — Auto-Fill will pull real sold-comp data from Terapeak.';
-        connectBtn.classList.add('hidden');
-        disconnectBtn.classList.remove('hidden');
-      } else {
-        statusEl.textContent = 'Not connected — sold comps will show links only.';
-        connectBtn.classList.remove('hidden');
-        connectBtn.disabled = false;
-        disconnectBtn.classList.add('hidden');
-      }
-    } catch (err) {
-      statusEl.textContent = `Unable to check Terapeak status: ${err.message}`;
+  function paintTerapeakBanner(statusEl, connectBtn, disconnectBtn, data) {
+    if (!statusEl || !connectBtn || !disconnectBtn) return;
+    if (data.loginInProgress) {
+      statusEl.textContent = 'Browser window open — log into eBay there, then come back here.';
+      connectBtn.classList.remove('hidden');
+      connectBtn.disabled = true;
+      disconnectBtn.classList.add('hidden');
+    } else if (data.connected) {
+      statusEl.textContent = 'Connected — Auto-Fill will pull real sold-comp data from Terapeak.';
+      connectBtn.classList.add('hidden');
+      disconnectBtn.classList.remove('hidden');
+    } else {
+      statusEl.textContent = 'Not connected — sold comps will show links only.';
+      connectBtn.classList.remove('hidden');
+      connectBtn.disabled = false;
+      disconnectBtn.classList.add('hidden');
     }
   }
 
-  async function terapeakConnect() {
-    const btn = $('pg-terapeak-connect');
-    const statusEl = $('pg-terapeak-status');
+  async function loadTerapeakStatus() {
+    try {
+      const data = await fetch('/api/terapeak/status').then(r => r.json());
+      TERAPEAK_BANNERS.forEach(([statusId, connectId, disconnectId]) =>
+        paintTerapeakBanner($(statusId), $(connectId), $(disconnectId), data));
+    } catch (err) {
+      TERAPEAK_BANNERS.forEach(([statusId]) => {
+        const el = $(statusId);
+        if (el) el.textContent = `Unable to check Terapeak status: ${err.message}`;
+      });
+    }
+  }
+
+  async function terapeakConnect(e) {
+    const btn = e?.currentTarget || $('pg-terapeak-connect');
     try {
       btn.disabled = true;
       const data = await fetch('/api/terapeak/connect', { method: 'POST' }).then(r => r.json());
-      if (statusEl) statusEl.textContent = data.message || 'Opening browser…';
+      TERAPEAK_BANNERS.forEach(([statusId]) => {
+        const el = $(statusId);
+        if (el) el.textContent = data.message || 'Opening browser…';
+      });
       // Poll status every few seconds until the login window closes (saved or cancelled)
       const poll = setInterval(async () => {
         const s = await fetch('/api/terapeak/status').then(r => r.json()).catch(() => null);
@@ -172,7 +192,10 @@
         }
       }, 3000);
     } catch (err) {
-      if (statusEl) statusEl.textContent = `Connect failed: ${err.message}`;
+      TERAPEAK_BANNERS.forEach(([statusId]) => {
+        const el = $(statusId);
+        if (el) el.textContent = `Connect failed: ${err.message}`;
+      });
       btn.disabled = false;
     }
   }
@@ -204,152 +227,289 @@
     if (status) updateLicenseUI(status);
   }
 
-  // ── eBay Sniper ───────────────────────────────────────────────────────────
-  let sniperAuctions = JSON.parse(localStorage.getItem('sniperAuctions') || '[]');
-  let sniperTimers   = {};
-
-  function showSniperSection() {
+  // ── Gem Radar ─────────────────────────────────────────────────────────────
+  function showGemsSection() {
     hideOverlaySections();
-    $('sniper-section')?.classList.remove('hidden');
-    $('sniper-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'sniper'));
-    renderSniper();
-    sniperAuctions.forEach(a => scheduleSniperBid(a));
+    $('new-listing-overlay')?.classList.add('hidden');
+    $('gems-section')?.classList.remove('hidden');
+    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'gems'));
+    loadGemsFeed();
   }
 
-  function saveSniperAuctions() {
-    localStorage.setItem('sniperAuctions', JSON.stringify(sniperAuctions));
+  function closeGemsSection() {
+    $('gems-section')?.classList.add('hidden');
+    showDashboard();
   }
 
-  function renderSniper() {
-    const tbody  = $('sniper-tbody');
-    const empty  = $('sniper-empty');
-    const table  = $('sniper-table');
-    if (!tbody) return;
-    if (!sniperAuctions.length) {
-      empty?.classList.remove('hidden');
-      table?.classList.add('hidden');
+  async function loadGemsFeed() {
+    const locked  = $('gems-locked');
+    const content = $('gems-content');
+    const status  = $('gems-status');
+    const list    = $('gems-list');
+    if (!locked || !content || !status || !list) return;
+
+    try {
+      const res = await fetch('/api/gems/feed');
+      if (res.status === 402) {
+        locked.classList.remove('hidden');
+        content.classList.add('hidden');
+        return;
+      }
+      locked.classList.add('hidden');
+      content.classList.remove('hidden');
+
+      const data = await res.json();
+      if (!data.count) {
+        status.innerHTML = data.lastScanUtc
+          ? `Scanned <strong>${data.totalScans}</strong> time${data.totalScans === 1 ? '' : 's'} so far — last on "${esc(data.lastScanCategory || '')}" at ${new Date(data.lastScanUtc).toLocaleTimeString()}. No gems currently clear the bar — check back soon.`
+          : `Gem Radar hasn't completed a scan yet — the background scanner checks a new category roughly every 12 minutes.`;
+        list.innerHTML = `<div class="opp-results-empty">No gems found yet.</div>`;
+        return;
+      }
+
+      status.innerHTML = `<strong>${data.count}</strong> gem${data.count === 1 ? '' : 's'} live right now · last scan "${esc(data.lastScanCategory || '')}" at ${new Date(data.lastScanUtc).toLocaleTimeString()} · ${data.totalScans} scans total · ${data.cachedQueries} prices cached so far`;
+      list.innerHTML = data.gems.map(g => buildOpportunityRowHtml(g.item)).join('');
+    } catch (err) {
+      status.textContent = `Unable to load Gem Radar feed: ${err.message}`;
+    }
+  }
+
+  // ── Opportunity Finder ───────────────────────────────────────────────────
+  function showOpportunitySection() {
+    hideOverlaySections();
+    $('new-listing-overlay')?.classList.add('hidden');
+    $('opportunity-section')?.classList.remove('hidden');
+    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'opportunity'));
+    loadTerapeakStatus();
+  }
+
+  function closeOpportunitySection() {
+    $('opportunity-section')?.classList.add('hidden');
+    showDashboard();
+  }
+
+  function formatEndsIn(iso) {
+    if (!iso) return 'Unknown end time';
+    const ms = new Date(iso).getTime() - Date.now();
+    if (ms <= 0) return 'Ending now';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return `Ends in ${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 48) return `Ends in ${hrs}h ${mins % 60}m`;
+    return `Ends in ${Math.floor(hrs / 24)}d`;
+  }
+
+  function renderOpportunityStatsCards(data) {
+    const grid = $('opp-stats-grid');
+    if (!grid) return;
+
+    const pct = (v, withSign) => v == null ? '—' : `${withSign && v > 0 ? '+' : ''}${v}%`;
+    const pctClass = v => v == null ? '' : v > 0 ? 'good' : v < 0 ? 'bad' : '';
+    const sourceLabel = data.soldSource === 'terapeak' ? 'Terapeak sold comps'
+      : data.soldSource === 'marketplace_insights' ? 'eBay sold comps' : 'No sold-comp data';
+    const listingLabel = data.listingType === 'FIXED_PRICE' ? 'Fixed price' : data.listingType === 'BOTH' ? 'Auctions + fixed price' : 'Auctions ending soon';
+
+    const best = data.bestOpportunity;
+    const bestTag  = best ? 'a' : 'div';
+    const bestAttr = best ? `href="${esc(best.url)}" target="_blank" rel="noopener"` : '';
+    const bestNote = best ? `${best.isVerified ? '✓ Terapeak-matched — ' : '(rough estimate) '}${esc(best.title)}` : 'No priced opportunities';
+
+    grid.innerHTML = `
+      <${bestTag} class="stat-card" ${bestAttr}>
+        <span class="stat-label">Best Opportunity</span>
+        <strong class="${pctClass(best?.profitPercent)}">${best ? pct(best.profitPercent, true) : '—'}</strong>
+        <span class="stat-note">${bestNote}</span>
+      </${bestTag}>
+      <div class="stat-card">
+        <span class="stat-label">Average Market Price</span>
+        <strong>${data.averagePrice > 0 ? `$${data.averagePrice.toFixed(2)}` : '—'}</strong>
+        <span class="stat-note">${sourceLabel}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Lowest Total Cost</span>
+        <strong>${data.lowestPrice != null ? `$${data.lowestPrice.toFixed(2)}` : '—'}</strong>
+        <span class="stat-note">Price + shipping, among ${data.count}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Active Listings</span>
+        <strong>${data.count}</strong>
+        <span class="stat-note">${listingLabel}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Est. Sell-Through</span>
+        <strong>${data.sellThroughPercent != null ? `${data.sellThroughPercent}%` : '—'}</strong>
+        <span class="stat-note">${data.sellThroughPercent != null ? 'eBay sell-through rate' : 'Not available for this search'}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Avg. Profit Potential</span>
+        <strong class="${pctClass(data.avgProfitPercent)}">${pct(data.avgProfitPercent, true)}</strong>
+        <span class="stat-note">${data.avgProfitPercent != null ? 'Across priced listings' : 'No sold-comp data'}</span>
+      </div>`;
+  }
+
+  let lastOpportunityData = null;
+
+  const OPP_FILTERS = [
+    ['opp-filter-underpriced',  it => it.isUnderpriced],
+    ['opp-filter-ending-soon',  it => it.isEndingSoon],
+    ['opp-filter-poor-titles',  it => it.hasPoorTitle],
+    ['opp-filter-misspelled',   it => it.hasMisspelledTitle],
+    ['opp-filter-poor-photos',  it => it.hasPoorPhoto],
+    ['opp-filter-high-demand',  it => it.isHighDemand],
+    ['opp-filter-high-profit',  it => it.isHighProfitMargin],
+    ['opp-filter-newly-listed', it => it.isNewlyListed],
+  ];
+
+  function applyOpportunityFilters() {
+    if (!lastOpportunityData) return;
+    const active = OPP_FILTERS.filter(([id]) => $(id)?.checked);
+    const items = active.length
+      ? lastOpportunityData.items.filter(it => active.every(([, test]) => test(it)))
+      : lastOpportunityData.items;
+    renderOpportunityList(items, lastOpportunityData.items.length);
+  }
+
+  function renderOpportunityList(items, totalCount) {
+    const list = $('opp-results-list');
+    if (!list) return;
+
+    if (!items.length) {
+      list.innerHTML = `<div class="opp-results-empty">No matching listings right now — try a broader keyword or looser filters.</div>`;
       return;
     }
-    empty?.classList.add('hidden');
-    table?.classList.remove('hidden');
-    tbody.innerHTML = sniperAuctions.map((a, i) => {
-      const endsMs   = a.endsAt ? new Date(a.endsAt).getTime() : null;
-      const now      = Date.now();
-      const secsLeft = endsMs ? Math.floor((endsMs - now) / 1000) : null;
-      const timeStr  = endsMs
-        ? (secsLeft > 0 ? formatCountdown(secsLeft) : 'Ended')
-        : 'Unknown';
-      const statusBadge = a.status === 'won'    ? '<span style="color:#4ade80;font-weight:700">✓ Won</span>'
-                        : a.status === 'bid_placed' ? '<span style="color:#60a5fa">Bid placed</span>'
-                        : a.status === 'sniped' ? '<span style="color:#60a5fa">Sniped</span>'
-                        : a.status === 'lost'   ? '<span style="color:#f87171">Lost</span>'
-                        : secsLeft !== null && secsLeft <= 30 ? '<span style="color:#fbbf24;font-weight:700">⚡ Firing soon</span>'
-                        : '<span style="color:#94a3b8">Watching</span>';
-      return `<tr style="border-bottom:1px solid #1e2330;font-size:13px">
-        <td style="padding:12px;max-width:260px">
-          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.title || a.itemId)}</div>
-          <a href="https://www.ebay.com/itm/${esc(a.itemId)}" target="_blank" style="font-size:11px;color:#60a5fa">Item #${esc(a.itemId)}</a>
-        </td>
-        <td style="padding:12px;white-space:nowrap;color:${secsLeft !== null && secsLeft < 120 ? '#fbbf24' : '#94a3b8'}">${timeStr}</td>
-        <td style="padding:12px;text-align:right;color:#e2e8f0">${a.currentBid ? '$' + a.currentBid.toFixed(2) : '—'}</td>
-        <td style="padding:12px;text-align:right;color:#4ade80;font-weight:600">$${parseFloat(a.maxBid).toFixed(2)}</td>
-        <td style="padding:12px;text-align:center">${statusBadge}</td>
-        <td style="padding:12px;text-align:center">
-          <button onclick="removeSnipe(${i})" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:16px" title="Remove">✕</button>
-        </td>
-      </tr>`;
-    }).join('');
 
-    // refresh table every second for live countdown
-    clearTimeout(sniperRenderTimer);
-    sniperRenderTimer = setTimeout(renderSniper, 1000);
+    const filterNote = items.length < totalCount
+      ? `<div class="opp-results-filtered-note">Showing ${items.length} of ${totalCount} listings</div>` : '';
+
+    list.innerHTML = filterNote + items.map(buildOpportunityRowHtml).join('');
   }
 
-  let sniperRenderTimer = null;
-
-  function formatCountdown(secs) {
-    if (secs > 86400) return Math.floor(secs / 86400) + 'd ' + Math.floor((secs % 86400) / 3600) + 'h';
-    if (secs > 3600)  return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
-    if (secs > 60)    return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-    return secs + 's';
+  // Shared by the Opportunity Finder results list and the Gem Radar feed — both display the
+  // same OpportunityListItem shape, just sourced differently (a live search vs. the passive
+  // background scanner), so they render identically instead of drifting into two designs.
+  function buildOpportunityRowHtml(it) {
+    const profitClass = it.profitPercent == null ? 'flat' : it.profitPercent > 0 ? 'good' : 'bad';
+    const profitPct    = it.profitPercent == null ? '—' : `${it.profitPercent > 0 ? '+' : ''}${it.profitPercent}%`;
+    const profitAmount = it.estimatedProfit == null ? '' : ` (${it.estimatedProfit > 0 ? '+' : ''}$${Math.abs(it.estimatedProfit).toFixed(2)})`;
+    const isAuction    = it.buyingOption === 'AUCTION';
+    const listingLabel = isAuction ? 'Auction' : 'Fixed Price';
+    const bidsText     = isAuction ? `${it.bidCount} bid${it.bidCount === 1 ? '' : 's'}` : '—';
+    const timeText     = isAuction ? formatEndsIn(it.endDate) : '—';
+    const verifiedTag  = it.profitPercent == null ? ''
+      : it.isVerified ? '<span class="opp-verified-tag opp-verified">✓ Terapeak-matched</span>'
+      : '<span class="opp-verified-tag opp-estimate">rough estimate</span>';
+    const scoreClass = it.opportunityScore == null ? '' : it.opportunityScore >= 60 ? 'good' : it.opportunityScore >= 35 ? 'mid' : 'bad';
+    const scoreText  = it.opportunityScore == null ? '—' : it.opportunityScore;
+    return `<div class="opp-result-row">
+      <img class="opp-result-thumb" src="${esc(it.imageUrl || '')}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="opp-result-info">
+        <div class="opp-result-title"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a></div>
+        <div class="opp-result-meta">
+          <span class="opp-result-listing-type">${listingLabel}</span>
+          ${esc(it.sellerUsername || 'Unknown seller')} · ${it.sellerFeedbackScore.toLocaleString()} feedback · ${bidsText} · ${timeText}
+        </div>
+      </div>
+      <div class="opp-result-costs">
+        <div class="opp-cost-line"><span>Price</span><strong>$${it.price.toFixed(2)}</strong></div>
+        <div class="opp-cost-line"><span>Shipping</span><strong>${it.shippingCost > 0 ? `$${it.shippingCost.toFixed(2)}` : 'Free'}</strong></div>
+        <div class="opp-cost-line total"><span>Total cost</span><strong>$${it.totalCost.toFixed(2)}</strong></div>
+      </div>
+      <div class="opp-result-value">
+        <div class="opp-cost-line"><span>Market avg</span><strong>${it.marketAverage != null ? `$${it.marketAverage.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Est. resale</span><strong>${it.estimatedResalePrice != null ? `$${it.estimatedResalePrice.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line profit ${profitClass}"><span>Est. profit</span><strong>${profitPct}${profitAmount}</strong></div>
+        ${verifiedTag}
+      </div>
+      <div class="opp-result-score">
+        <div class="opp-score-badge ${scoreClass}">${scoreText}</div>
+        <span class="opp-result-score-label">Score</span>
+      </div>
+    </div>`;
   }
 
-  window.removeSnipe = function(i) {
-    clearTimeout(sniperTimers[sniperAuctions[i]?.itemId]);
-    sniperAuctions.splice(i, 1);
-    saveSniperAuctions();
-    renderSniper();
-  };
+  function renderOpportunityResults(data) {
+    const summary = $('opp-results-summary');
+    if (!summary) return;
 
-  async function addSnipe() {
-    const rawUrl = $('sniper-url-input')?.value.trim();
-    const maxBid = parseFloat($('sniper-bid-input')?.value);
-    if (!rawUrl)      { alert('Paste an eBay auction URL or item ID.'); return; }
-    if (!maxBid || maxBid <= 0) { alert('Enter a valid max bid amount.'); return; }
+    lastOpportunityData = data;
+    renderOpportunityStatsCards(data);
 
-    const m = rawUrl.match(/(\d{10,13})/);
-    const itemId = m ? m[1] : rawUrl.replace(/\D/g, '');
-    if (!itemId) { alert('Could not find an item ID in that URL.'); return; }
+    const valueNote = data.marketValue > 0
+      ? `Estimated market value <strong>$${data.marketValue.toFixed(2)}</strong> (${data.soldSource === 'terapeak' ? 'Terapeak sold comps' : 'recent sold comps'})`
+      : `No sold-comp data found for this keyword yet — profit % isn't available, but listings are still shown below.`;
+    const listingLabel = data.listingType === 'FIXED_PRICE' ? 'fixed-price listings' : data.listingType === 'BOTH' ? 'listings' : 'auctions ending soon';
+    summary.innerHTML = `Found <strong>${data.count}</strong> ${listingLabel} for "${esc(data.query)}". ${valueNote}`;
 
-    const btn = $('btn-sniper-submit');
-    if (btn) { btn.disabled = true; btn.textContent = 'Looking up…'; }
+    applyOpportunityFilters();
+  }
 
-    let title = '', endsAt = null, currentBid = null;
+  async function findOpportunities() {
+    const q = $('opp-search-input')?.value.trim();
+    if (!q) { $('opp-search-input')?.focus(); return; }
+    const category    = $('opp-category-input')?.value.trim();
+    const condition   = $('opp-condition-select')?.value;
+    const minPrice    = $('opp-min-price-input')?.value;
+    const maxPrice    = $('opp-max-price-input')?.value;
+    const listingType = $('opp-listing-type-select')?.value || 'AUCTION';
+
+    const btn   = $('opp-find-btn');
+    const results = $('opp-results');
+    const summary = $('opp-results-summary');
+    const list    = $('opp-results-list');
+    const stats   = $('opp-stats-grid');
+    if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
+    results?.classList.remove('hidden');
+    if (summary) summary.innerHTML = 'Searching live listings and checking sold comps — verifying the top candidates can take up to a minute…';
+    if (list) list.innerHTML = '';
+    if (stats) stats.innerHTML = '';
+    OPP_FILTERS.forEach(([id]) => { const el = $(id); if (el) el.checked = false; });
+
     try {
-      const res = await fetch(`/api/sniper/lookup?itemId=${itemId}`);
-      if (res.ok) {
-        const d = await res.json();
-        title      = d.title      || '';
-        endsAt     = d.endsAt     || null;
-        currentBid = d.currentBid || null;
-      }
-    } catch { /* non-fatal — add anyway */ }
+      const params = new URLSearchParams({ q, listingType });
+      if (category)  params.set('category', category);
+      if (condition) params.set('condition', condition);
+      if (minPrice)  params.set('minPrice', minPrice);
+      if (maxPrice)  params.set('maxPrice', maxPrice);
 
-    const auction = { itemId, title, maxBid, endsAt, currentBid, status: 'watching', addedAt: new Date().toISOString() };
-    sniperAuctions.push(auction);
-    saveSniperAuctions();
-    scheduleSniperBid(auction);
-
-    if ($('sniper-url-input')) $('sniper-url-input').value = '';
-    if ($('sniper-bid-input')) $('sniper-bid-input').value = '';
-    if (btn) { btn.disabled = false; btn.textContent = 'Track It'; }
-    $('sniper-add-form')?.classList.add('hidden');
-    renderSniper();
+      const res = await guardedFetch(`/api/opportunities/search?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Search failed');
+      renderOpportunityResults(data);
+    } catch (err) {
+      if (summary) summary.textContent = `Search failed: ${err.message}`;
+      if (list) list.innerHTML = '';
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Search'; }
+    }
   }
 
-  function scheduleSniperBid(auction) {
-    if (!auction.endsAt || auction.status === 'bid_placed' || auction.status === 'won' || auction.status === 'lost') return;
-    const endsMs    = new Date(auction.endsAt).getTime();
-    const fireAt    = endsMs - 8000; // 8 seconds before end
-    const delay     = fireAt - Date.now();
-    if (delay < 0) return;
-
-    clearTimeout(sniperTimers[auction.itemId]);
-    sniperTimers[auction.itemId] = setTimeout(async () => {
-      const idx = sniperAuctions.findIndex(a => a.itemId === auction.itemId);
-      if (idx < 0) return;
-      try {
-        const res = await fetch('/api/sniper/bid', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemId: auction.itemId, maxBid: auction.maxBid })
-        });
-        const d = res.ok ? await res.json() : { ok: false };
-        sniperAuctions[idx].status = d.ok ? 'bid_placed' : 'lost';
-        addActivity('Sniper fired', `Item #${auction.itemId} — ${d.ok ? 'bid placed $' + auction.maxBid.toFixed(2) : 'bid failed'}`);
-      } catch {
-        sniperAuctions[idx].status = 'lost';
-      }
-      saveSniperAuctions();
-      renderSniper();
-    }, delay);
+  function bindOpportunitySearch() {
+    on('opp-find-btn', 'click', findOpportunities);
+    on('opp-search-input',    'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
+    on('opp-category-input',  'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
+    on('opp-min-price-input', 'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
+    on('opp-max-price-input', 'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
+    OPP_FILTERS.forEach(([id]) => on(id, 'change', applyOpportunityFilters));
+    on('opp-close', 'click', closeOpportunitySection);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !$('opportunity-section')?.classList.contains('hidden')) closeOpportunitySection();
+    });
   }
 
-  function bindSniper() {
-    on('btn-sniper-add',    'click', () => $('sniper-add-form')?.classList.toggle('hidden'));
-    on('btn-sniper-cancel', 'click', () => $('sniper-add-form')?.classList.add('hidden'));
-    on('btn-sniper-submit', 'click', addSnipe);
+  function bindGemsSection() {
+    on('gems-close', 'click', closeGemsSection);
+    on('gems-upgrade-btn', 'click', () => { location.hash = 'license'; });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !$('gems-section')?.classList.contains('hidden')) closeGemsSection();
+    });
+  }
+
+  function goHome() { location.hash = 'dashboard'; }
+
+  function bindHomeButtons() {
+    on('nl-home',  'click', goHome);
+    on('opp-home', 'click', goHome);
+    on('gems-home', 'click', goHome);
   }
 
   async function activateLicensePage() {
@@ -3482,6 +3642,8 @@
     on('pg-imggen-test', 'click', testPgImggenConnection);
     on('pg-terapeak-connect', 'click', terapeakConnect);
     on('pg-terapeak-disconnect', 'click', terapeakDisconnect);
+    on('opp-terapeak-connect', 'click', terapeakConnect);
+    on('opp-terapeak-disconnect', 'click', terapeakDisconnect);
     on('pg-imggen-guide', 'click', openImageGenSetup);
     on('pg-imggen-load-models', 'click', () => {
       const endpoint = $('pg-imggen-endpoint')?.value.trim();

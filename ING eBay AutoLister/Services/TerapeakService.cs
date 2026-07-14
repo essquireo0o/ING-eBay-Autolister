@@ -41,9 +41,11 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
         var script =
             $"const {{ chromium }} = require('{pwPath}');\n" +
             "(async () => {\n" +
-            "  const browser = await chromium.launch({ headless: false, args: ['--disable-blink-features=AutomationControlled'] });\n" +
-            "  const ctx = await browser.newContext({ viewport: null, userAgent:\n" +
-            "    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' });\n" +
+            // The real installed Chrome (not Playwright's bundled "Chrome for Testing" build)
+            // reports a normal, self-consistent fingerprint — eBay's bot detection flags the
+            // bundled test browser much more readily, especially after repeated automated hits.
+            "  const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--disable-blink-features=AutomationControlled'] });\n" +
+            "  const ctx = await browser.newContext({ viewport: null });\n" +
             "  await ctx.addInitScript(() => { Object.defineProperty(navigator,'webdriver',{get:()=>undefined}); });\n" +
             "  const page = await ctx.newPage();\n" +
             "  try {\n" +
@@ -132,7 +134,7 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
         var script =
             $"const {{ chromium }} = require('{pwPath}');\n" +
             "(async () => {\n" +
-            "  const browser = await chromium.launch({ headless: true });\n" +
+            "  const browser = await chromium.launch({ channel: 'chrome', headless: true });\n" +
             $"  const ctx = await browser.newContext({{ storageState: '{sessionPathEscaped}', viewport: {{ width: 1400, height: 1000 }} }});\n" +
             "  const page = await ctx.newPage();\n" +
             "  let loggedOut = false;\n" +
