@@ -38,7 +38,7 @@
             <ServiceInstall Id="INGAutoListerSvc"
                             Name="INGAutoLister"
                             DisplayName="ING AutoLister"
-                            Description="ING Listing Engine - web server on localhost:9330 by ING Mining LLC"
+                            Description="ING Listing Engine - web server on localhost:9331 by ING Mining LLC"
                             Start="auto"
                             Type="ownProcess"
                             ErrorControl="normal"

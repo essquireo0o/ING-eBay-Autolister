@@ -209,7 +209,7 @@ if (-not `$alreadySet) {
         # Try direct write (works when running as admin)
         Add-Content `$hostsFile "`n`$hostsEntry" -Encoding ASCII -ErrorAction Stop
         Write-Host "  Local DNS added: inglistingengine.com -> 127.0.0.1" -ForegroundColor Green
-        Write-Host "  You can access the app at: http://inglistingengine.com:9330" -ForegroundColor Green
+        Write-Host "  You can access the app at: http://inglistingengine.com:9331" -ForegroundColor Green
     } catch {
         # Not admin - re-launch the elevated helper
         Write-Host "  Adding local DNS (UAC prompt may appear)..." -ForegroundColor Yellow
@@ -225,9 +225,9 @@ Write-Host ""
 Write-Host "  Launching ING AutoLister..." -ForegroundColor Cyan
 Start-Process `$exePath
 Start-Sleep -Seconds 3
-Start-Process "http://localhost:9330"
+Start-Process "http://localhost:9331"
 Write-Host ""
-Write-Host "  Done! The app is running at http://localhost:9330" -ForegroundColor Green
+Write-Host "  Done! The app is running at http://localhost:9331" -ForegroundColor Green
 Write-Host "  It lives in the system tray - right-click the tray icon to open or quit." -ForegroundColor Green
 Write-Host ""
 "@

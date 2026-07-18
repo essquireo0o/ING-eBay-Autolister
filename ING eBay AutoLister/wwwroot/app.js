@@ -5,6 +5,7 @@
   let activeOfferId = '';
   let activeListingId = '';
   let activeSku = '';
+  let activeListingStatus = '';
   let pendingDraftPayload = null;
   let cachedListings = [];
   let cachedPolicies = null; // { fulfillmentPolicies, paymentPolicies, returnPolicies }
@@ -26,7 +27,7 @@
     bindImageGenSetup();
     bindPgImggen();
     bindOpportunitySearch();
-    bindGemsSection();
+    bindSupplierAnalyzer();
     bindHomeButtons();
     bindForm();
     restoreListingViewMode();
@@ -82,7 +83,6 @@
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === page));
     if (page !== 'ai') $('new-listing-overlay')?.classList.add('hidden');
     if (page !== 'opportunity') $('opportunity-section')?.classList.add('hidden');
-    if (page !== 'gems') $('gems-section')?.classList.add('hidden');
     if (page === 'ai') {
       showAiSection();
       return;
@@ -103,10 +103,6 @@
       showOpportunitySection();
       return;
     }
-    if (page === 'gems') {
-      showGemsSection();
-      return;
-    }
     showDashboard();
     if (page === 'listings') $('listings-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (page === 'activity') $('activity-list')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -116,7 +112,7 @@
     openNewListingModal();
   }
 
-  const OVERLAY_SECTIONS = ['settings-section', 'logs-section', 'license-section', 'opportunity-section', 'gems-section'];
+  const OVERLAY_SECTIONS = ['settings-section', 'logs-section', 'license-section', 'opportunity-section'];
 
   function hideOverlaySections() {
     OVERLAY_SECTIONS.forEach(id => $(id)?.classList.add('hidden'));
@@ -142,22 +138,30 @@
     ['opp-terapeak-status', 'opp-terapeak-connect', 'opp-terapeak-disconnect'],
   ];
 
+  // There is no auto-connect and no background scraping — unattended, continuous automated
+  // access to Terapeak/Seller Hub is against eBay's User Agreement. Connecting is always a
+  // person clicking the button below and logging into eBay themselves in the browser window
+  // that opens (which is also the only way to clear a captcha/security challenge if eBay shows
+  // one). Both Settings and the Opportunity Finder banner carry the same connect/disconnect
+  // controls so a session can be (re)established from wherever the user notices it's needed.
   function paintTerapeakBanner(statusEl, connectBtn, disconnectBtn, data) {
-    if (!statusEl || !connectBtn || !disconnectBtn) return;
+    if (!statusEl) return;
     if (data.loginInProgress) {
-      statusEl.textContent = 'Browser window open — log into eBay there, then come back here.';
-      connectBtn.classList.remove('hidden');
-      connectBtn.disabled = true;
-      disconnectBtn.classList.add('hidden');
+      statusEl.textContent = 'Connecting to Terapeak — a browser window should appear, log into eBay there.';
+      connectBtn?.classList.remove('hidden');
+      if (connectBtn) connectBtn.disabled = true;
+      disconnectBtn?.classList.add('hidden');
     } else if (data.connected) {
-      statusEl.textContent = 'Connected — Auto-Fill will pull real sold-comp data from Terapeak.';
-      connectBtn.classList.add('hidden');
-      disconnectBtn.classList.remove('hidden');
+      statusEl.textContent = '✓ Connected — sold-comp lookups will use real Terapeak data.';
+      connectBtn?.classList.add('hidden');
+      disconnectBtn?.classList.remove('hidden');
     } else {
-      statusEl.textContent = 'Not connected — sold comps will show links only.';
-      connectBtn.classList.remove('hidden');
-      connectBtn.disabled = false;
-      disconnectBtn.classList.add('hidden');
+      statusEl.textContent = data.lastError
+        ? `Terapeak connect failed: ${data.lastError}`
+        : 'Not connected — sold comps will show links only. Click Connect to log in.';
+      connectBtn?.classList.remove('hidden');
+      if (connectBtn) connectBtn.disabled = false;
+      disconnectBtn?.classList.add('hidden');
     }
   }
 
@@ -227,53 +231,6 @@
     if (status) updateLicenseUI(status);
   }
 
-  // ── Gem Radar ─────────────────────────────────────────────────────────────
-  function showGemsSection() {
-    hideOverlaySections();
-    $('new-listing-overlay')?.classList.add('hidden');
-    $('gems-section')?.classList.remove('hidden');
-    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'gems'));
-    loadGemsFeed();
-  }
-
-  function closeGemsSection() {
-    $('gems-section')?.classList.add('hidden');
-    showDashboard();
-  }
-
-  async function loadGemsFeed() {
-    const locked  = $('gems-locked');
-    const content = $('gems-content');
-    const status  = $('gems-status');
-    const list    = $('gems-list');
-    if (!locked || !content || !status || !list) return;
-
-    try {
-      const res = await fetch('/api/gems/feed');
-      if (res.status === 402) {
-        locked.classList.remove('hidden');
-        content.classList.add('hidden');
-        return;
-      }
-      locked.classList.add('hidden');
-      content.classList.remove('hidden');
-
-      const data = await res.json();
-      if (!data.count) {
-        status.innerHTML = data.lastScanUtc
-          ? `Scanned <strong>${data.totalScans}</strong> time${data.totalScans === 1 ? '' : 's'} so far — last on "${esc(data.lastScanCategory || '')}" at ${new Date(data.lastScanUtc).toLocaleTimeString()}. No gems currently clear the bar — check back soon.`
-          : `Gem Radar hasn't completed a scan yet — the background scanner checks a new category roughly every 12 minutes.`;
-        list.innerHTML = `<div class="opp-results-empty">No gems found yet.</div>`;
-        return;
-      }
-
-      status.innerHTML = `<strong>${data.count}</strong> gem${data.count === 1 ? '' : 's'} live right now · last scan "${esc(data.lastScanCategory || '')}" at ${new Date(data.lastScanUtc).toLocaleTimeString()} · ${data.totalScans} scans total · ${data.cachedQueries} prices cached so far`;
-      list.innerHTML = data.gems.map(g => buildOpportunityRowHtml(g.item)).join('');
-    } catch (err) {
-      status.textContent = `Unable to load Gem Radar feed: ${err.message}`;
-    }
-  }
-
   // ── Opportunity Finder ───────────────────────────────────────────────────
   function showOpportunitySection() {
     hideOverlaySections();
@@ -281,6 +238,82 @@
     $('opportunity-section')?.classList.remove('hidden');
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.page === 'opportunity'));
     loadTerapeakStatus();
+    loadHighSellThrough();
+    loadLowCompetition();
+    loadPricingRecommendations();
+    loadSeasonalDemand();
+  }
+
+  // ── Opportunity Finder insight cards ─────────────────────────────────────
+  function renderInsightList(elId, items, rowFn, emptyMsg) {
+    const el = $(elId);
+    if (!el) return;
+    el.innerHTML = items.length
+      ? items.map(rowFn).join('')
+      : `<p class="opportunity-empty">${emptyMsg}</p>`;
+  }
+
+  async function loadHighSellThrough() {
+    try {
+      const data = await fetch('/api/insights/high-sell-through').then(r => r.json());
+      renderInsightList('insight-sell-through', data.items || [], it => `
+        <div class="opportunity-insight-row">
+          <span class="opportunity-insight-label">${esc(it.category)}</span>
+          <span class="opportunity-insight-value good">${it.sellThroughPercent}%</span>
+        </div>`,
+        'Not enough priced categories yet — run some Opportunity Finder searches to build this up.');
+    } catch { /* leave loading state — non-critical */ }
+  }
+
+  async function loadLowCompetition() {
+    try {
+      const data = await fetch('/api/insights/low-competition').then(r => r.json());
+      renderInsightList('insight-low-competition', data.items || [], it => `
+        <div class="opportunity-insight-row">
+          <span class="opportunity-insight-label">${esc(it.category)}</span>
+          <span class="opportunity-insight-value">${it.activeListings} listed · ${it.sellThroughPercent}% sell-through</span>
+        </div>`,
+        'Not enough priced categories yet — run some Opportunity Finder searches to build this up.');
+    } catch { /* leave loading state — non-critical */ }
+  }
+
+  async function loadPricingRecommendations() {
+    try {
+      const data = await fetch('/api/insights/pricing-recommendations').then(r => r.json());
+      renderInsightList('insight-pricing-recs', data.items || [], it => {
+        const cls = it.deltaPercent > 0 ? 'good' : 'bad';
+        const sign = it.deltaPercent > 0 ? '+' : '';
+        return `
+        <div class="opportunity-insight-row">
+          <a href="${esc(it.listingUrl)}" target="_blank" rel="noopener">${esc(it.title)}</a>
+          <span class="opportunity-insight-value ${cls}">$${it.currentPrice.toFixed(2)} → $${it.suggestedPrice.toFixed(2)} (${sign}${it.deltaPercent}%)</span>
+        </div>`;
+      }, 'No pricing gaps found yet in your active listings against cached market data.');
+    } catch { /* leave loading state — non-critical */ }
+  }
+
+  async function loadSeasonalDemand() {
+    try {
+      const data = await fetch('/api/insights/seasonal-demand').then(r => r.json());
+      const el = $('insight-seasonal');
+      if (!el) return;
+      const cur = data.current, next = data.upcoming;
+      el.innerHTML = `
+        <div class="opportunity-insight-row"><span class="opportunity-insight-label">${esc(cur.monthName)} (now)</span></div>
+        <p class="opportunity-empty" style="margin:-4px 0 8px">${cur.categories.map(esc).join(', ')}</p>
+        <div class="opportunity-insight-row"><span class="opportunity-insight-label">${esc(next.monthName)} (upcoming)</span></div>
+        <p class="opportunity-empty" style="margin:-4px 0 0">${next.categories.map(esc).join(', ')}</p>`;
+    } catch { /* leave loading state — non-critical */ }
+  }
+
+  function renderUnderpricedCard(items) {
+    const top = items.filter(it => it.isUnderpriced).sort((a, b) => (b.profitPercent ?? 0) - (a.profitPercent ?? 0)).slice(0, 5);
+    renderInsightList('insight-underpriced', top, it => `
+      <div class="opportunity-insight-row">
+        <a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
+        <span class="opportunity-insight-value good">+${it.profitPercent}%</span>
+      </div>`,
+      'No underpriced auctions in this search — try a broader keyword.');
   }
 
   function closeOpportunitySection() {
@@ -305,7 +338,8 @@
 
     const pct = (v, withSign) => v == null ? '—' : `${withSign && v > 0 ? '+' : ''}${v}%`;
     const pctClass = v => v == null ? '' : v > 0 ? 'good' : v < 0 ? 'bad' : '';
-    const sourceLabel = data.soldSource === 'terapeak' ? 'Terapeak sold comps'
+    const sourceLabel = data.soldSource === 'local_market_data' ? 'Local market research'
+      : data.soldSource === 'terapeak' ? 'Terapeak sold comps'
       : data.soldSource === 'marketplace_insights' ? 'eBay sold comps' : 'No sold-comp data';
     const listingLabel = data.listingType === 'FIXED_PRICE' ? 'Fixed price' : data.listingType === 'BOTH' ? 'Auctions + fixed price' : 'Auctions ending soon';
 
@@ -357,15 +391,70 @@
     ['opp-filter-poor-photos',  it => it.hasPoorPhoto],
     ['opp-filter-high-demand',  it => it.isHighDemand],
     ['opp-filter-high-profit',  it => it.isHighProfitMargin],
+    ['opp-filter-high-throughput', it => it.isHighThroughput],
     ['opp-filter-newly-listed', it => it.isNewlyListed],
+    ['opp-filter-low-competition', it => it.competitionLevel === 'Low'],
+    ['opp-filter-exclude-low-confidence', it => (it.confidenceScore ?? 0) >= 40],
+    ['opp-filter-exclude-parts-only', it => !(it.warnings || []).some(w => /parts|broken|accessor/i.test(w))],
+    ['opp-filter-exclude-no-exact-model', it => (it.scoreReasons || []).some(r => /model|identifier/i.test(r)) || (it.confidenceScore ?? 0) >= 65],
   ];
+
+  // Numeric "at least / at most" filters — a separate array from OPP_FILTERS since these read
+  // from number inputs instead of checkboxes.
+  const OPP_RANGE_FILTERS = [
+    ['opp-min-roi', 'min', it => it.roiPercent],
+    ['opp-min-net-profit', 'min', it => it.estimatedProfit],
+    ['opp-min-confidence', 'min', it => it.confidenceScore],
+    ['opp-min-sell-through', 'min', it => it.sellThroughPercent],
+    ['opp-max-days-to-sell', 'max', it => it.estimatedDaysToSell],
+  ];
+
+  const OPP_SORTERS = {
+    opportunityScore: it => it.opportunityScore ?? -999,
+    confidenceScore:  it => it.confidenceScore ?? -1,
+    totalProfit:      it => it.estimatedProfit ?? -999999,
+    netProfit:        it => it.estimatedProfit ?? -999999,
+    roiPercent:       it => it.roiPercent ?? -999,
+    sellThroughPercent: it => it.sellThroughPercent ?? -1,
+    velocity:         it => it.estimatedMonthlySales ?? -1,
+    totalCost:        it => -(it.totalCost ?? 0),
+    expectedSalePrice: it => it.estimatedResalePrice ?? -1,
+    daysToSell:       it => it.estimatedDaysToSell ?? 999999,
+  };
+
+  // Default composite sort: Opportunity Score -> Confidence -> Total profit -> Net profit/unit -> ROI.
+  function defaultOpportunitySort(items) {
+    return [...items].sort((a, b) =>
+      (b.opportunityScore ?? -999) - (a.opportunityScore ?? -999) ||
+      (b.confidenceScore ?? -1) - (a.confidenceScore ?? -1) ||
+      (b.estimatedProfit ?? -999999) - (a.estimatedProfit ?? -999999) ||
+      (b.roiPercent ?? -999) - (a.roiPercent ?? -999));
+  }
 
   function applyOpportunityFilters() {
     if (!lastOpportunityData) return;
     const active = OPP_FILTERS.filter(([id]) => $(id)?.checked);
-    const items = active.length
+    let items = active.length
       ? lastOpportunityData.items.filter(it => active.every(([, test]) => test(it)))
       : lastOpportunityData.items;
+
+    for (const [id, kind, getter] of OPP_RANGE_FILTERS) {
+      const raw = $(id)?.value;
+      if (raw === '' || raw == null) continue;
+      const bound = parseFloat(raw);
+      if (Number.isNaN(bound)) continue;
+      items = items.filter(it => {
+        const v = getter(it);
+        if (v == null) return false;
+        return kind === 'min' ? v >= bound : v <= bound;
+      });
+    }
+
+    const sortKey = $('opp-sort-select')?.value;
+    items = sortKey && OPP_SORTERS[sortKey]
+      ? [...items].sort((a, b) => OPP_SORTERS[sortKey](b) - OPP_SORTERS[sortKey](a))
+      : defaultOpportunitySort(items);
+
     renderOpportunityList(items, lastOpportunityData.items.length);
   }
 
@@ -382,11 +471,18 @@
       ? `<div class="opp-results-filtered-note">Showing ${items.length} of ${totalCount} listings</div>` : '';
 
     list.innerHTML = filterNote + items.map(buildOpportunityRowHtml).join('');
+    list.querySelectorAll('.opp-details-toggle').forEach(btn =>
+      btn.addEventListener('click', () => btn.closest('.opp-result-row')?.querySelector('.opp-result-details')?.classList.toggle('hidden')));
   }
 
-  // Shared by the Opportunity Finder results list and the Gem Radar feed — both display the
-  // same OpportunityListItem shape, just sourced differently (a live search vs. the passive
-  // background scanner), so they render identically instead of drifting into two designs.
+  function confidenceBadgeClass(level) {
+    if (!level) return '';
+    if (level.startsWith('High')) return 'good';
+    if (level.startsWith('Good')) return 'mid-good';
+    if (level.startsWith('Limited')) return 'mid';
+    return 'bad';
+  }
+
   function buildOpportunityRowHtml(it) {
     const profitClass = it.profitPercent == null ? 'flat' : it.profitPercent > 0 ? 'good' : 'bad';
     const profitPct    = it.profitPercent == null ? '—' : `${it.profitPercent > 0 ? '+' : ''}${it.profitPercent}%`;
@@ -400,6 +496,14 @@
       : '<span class="opp-verified-tag opp-estimate">rough estimate</span>';
     const scoreClass = it.opportunityScore == null ? '' : it.opportunityScore >= 60 ? 'good' : it.opportunityScore >= 35 ? 'mid' : 'bad';
     const scoreText  = it.opportunityScore == null ? '—' : it.opportunityScore;
+    const confClass  = confidenceBadgeClass(it.confidenceLevel);
+    const money = v => v != null ? `$${v.toFixed(2)}` : '—';
+
+    const warnings = (it.warnings || []).map(w => `<li class="opp-warning">⚠ ${esc(w)}</li>`).join('');
+    const reasons  = (it.scoreReasons || []).map(r => `<li class="opp-reason">✓ ${esc(r)}</li>`).join('');
+    const disagreement = it.marketDataDisagreement
+      ? `<div class="opp-disagreement">⚠ ${esc(it.disagreementMessage || 'Local and Terapeak pricing disagree — treat with caution.')}</div>` : '';
+
     return `<div class="opp-result-row">
       <img class="opp-result-thumb" src="${esc(it.imageUrl || '')}" alt="" onerror="this.style.visibility='hidden'">
       <div class="opp-result-info">
@@ -408,6 +512,7 @@
           <span class="opp-result-listing-type">${listingLabel}</span>
           ${esc(it.sellerUsername || 'Unknown seller')} · ${it.sellerFeedbackScore.toLocaleString()} feedback · ${bidsText} · ${timeText}
         </div>
+        <button type="button" class="opp-details-toggle link">Show scoring details ▾</button>
       </div>
       <div class="opp-result-costs">
         <div class="opp-cost-line"><span>Price</span><strong>$${it.price.toFixed(2)}</strong></div>
@@ -416,13 +521,34 @@
       </div>
       <div class="opp-result-value">
         <div class="opp-cost-line"><span>Market avg</span><strong>${it.marketAverage != null ? `$${it.marketAverage.toFixed(2)}` : '—'}</strong></div>
-        <div class="opp-cost-line"><span>Est. resale</span><strong>${it.estimatedResalePrice != null ? `$${it.estimatedResalePrice.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Recommended price</span><strong>${money(it.recommendedListingPrice)}</strong></div>
+        <div class="opp-cost-line"><span>Net resale</span><strong>${it.estimatedResalePrice != null ? `$${it.estimatedResalePrice.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Sell-through</span><strong>${it.sellThroughPercent != null ? `${it.sellThroughPercent}%` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>ROI</span><strong>${it.roiPercent != null ? `${it.roiPercent}%` : '—'}</strong></div>
         <div class="opp-cost-line profit ${profitClass}"><span>Est. profit</span><strong>${profitPct}${profitAmount}</strong></div>
         ${verifiedTag}
       </div>
       <div class="opp-result-score">
         <div class="opp-score-badge ${scoreClass}">${scoreText}</div>
         <span class="opp-result-score-label">Score</span>
+        ${it.confidenceLevel ? `<div class="opp-confidence-badge ${confClass}" title="${esc(it.confidenceLevel)}">${it.confidenceScore}</div><span class="opp-result-score-label">Confidence</span>` : ''}
+      </div>
+      <div class="opp-result-details hidden">
+        ${disagreement}
+        <div class="opp-details-grid">
+          <div><span>Quick-sale price</span><strong>${money(it.quickSalePrice)}</strong></div>
+          <div><span>Expected sale price</span><strong>${money(it.estimatedResalePrice)}</strong></div>
+          <div><span>High-price target</span><strong>${money(it.highPriceTarget)}</strong></div>
+          <div><span>Break-even price</span><strong>${money(it.breakEvenSalePrice)}</strong></div>
+          <div><span>Margin</span><strong>${it.marginPercent != null ? `${it.marginPercent}%` : '—'}</strong></div>
+          <div><span>Est. monthly sales</span><strong>${it.estimatedMonthlySales != null ? it.estimatedMonthlySales.toFixed(1) : '—'}</strong></div>
+          <div><span>Est. days to sell</span><strong>${it.estimatedDaysToSell ?? '—'}</strong></div>
+          <div><span>Price stability</span><strong>${it.priceStabilityScore ?? '—'}/100 (${esc(it.priceTrend || 'Unknown')})</strong></div>
+          <div><span>Competition</span><strong>${esc(it.competitionLevel || 'Unknown')} (${it.closeActiveComparableCount ?? 0})</strong></div>
+          <div><span>Local / Terapeak comps</span><strong>${it.localComparableCount ?? 0} / ${it.terapeakComparableCount ?? 0}</strong></div>
+          <div><span>Source weighting</span><strong>${(it.localWeightPercent ?? 0).toFixed(0)}% local / ${(it.terapeakWeightPercent ?? 0).toFixed(0)}% Terapeak</strong></div>
+        </div>
+        ${reasons || warnings ? `<ul class="opp-score-explanation">${reasons}${warnings}</ul>` : ''}
       </div>
     </div>`;
   }
@@ -435,22 +561,29 @@
     renderOpportunityStatsCards(data);
 
     const valueNote = data.marketValue > 0
-      ? `Estimated market value <strong>$${data.marketValue.toFixed(2)}</strong> (${data.soldSource === 'terapeak' ? 'Terapeak sold comps' : 'recent sold comps'})`
+      ? `Estimated market value <strong>$${data.marketValue.toFixed(2)}</strong> (${data.soldSource === 'local_market_data' ? 'local market research' : data.soldSource === 'terapeak' ? 'Terapeak sold comps' : 'recent sold comps'})`
       : `No sold-comp data found for this keyword yet — profit % isn't available, but listings are still shown below.`;
     const listingLabel = data.listingType === 'FIXED_PRICE' ? 'fixed-price listings' : data.listingType === 'BOTH' ? 'listings' : 'auctions ending soon';
-    summary.innerHTML = `Found <strong>${data.count}</strong> ${listingLabel} for "${esc(data.query)}". ${valueNote}`;
+    const queryLabel = data.query.startsWith('seller:') ? `seller "${esc(data.query.slice(7))}"` : `"${esc(data.query)}"`;
+    const illiquidNote = data.excludedIlliquidCount > 0
+      ? ` <span class="opp-results-filtered-note">(${data.excludedIlliquidCount} slow/stale-moving result${data.excludedIlliquidCount === 1 ? '' : 's'} hidden — check "Include slow/stale-moving results" to see ${data.excludedIlliquidCount === 1 ? 'it' : 'them'})</span>`
+      : '';
+    summary.innerHTML = `Found <strong>${data.count}</strong> ${listingLabel} for ${queryLabel}. ${valueNote}${illiquidNote}`;
 
     applyOpportunityFilters();
+    renderUnderpricedCard(data.items || []);
   }
 
   async function findOpportunities() {
-    const q = $('opp-search-input')?.value.trim();
-    if (!q) { $('opp-search-input')?.focus(); return; }
+    const q      = $('opp-search-input')?.value.trim();
+    const seller = $('opp-seller-input')?.value.trim();
+    if (!q && !seller) { $('opp-search-input')?.focus(); return; }
     const category    = $('opp-category-input')?.value.trim();
     const condition   = $('opp-condition-select')?.value;
     const minPrice    = $('opp-min-price-input')?.value;
     const maxPrice    = $('opp-max-price-input')?.value;
     const listingType = $('opp-listing-type-select')?.value || 'AUCTION';
+    const includeIlliquid = $('opp-include-illiquid')?.checked;
 
     const btn   = $('opp-find-btn');
     const results = $('opp-results');
@@ -459,17 +592,23 @@
     const stats   = $('opp-stats-grid');
     if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
     results?.classList.remove('hidden');
-    if (summary) summary.innerHTML = 'Searching live listings and checking sold comps — verifying the top candidates can take up to a minute…';
+    if (summary) summary.innerHTML = seller
+      ? 'Pulling this seller\'s listings and checking sold comps — verifying the top candidates can take up to a minute…'
+      : 'Searching live listings and checking sold comps — verifying the top candidates can take up to a minute…';
     if (list) list.innerHTML = '';
     if (stats) stats.innerHTML = '';
     OPP_FILTERS.forEach(([id]) => { const el = $(id); if (el) el.checked = false; });
+    OPP_RANGE_FILTERS.forEach(([id]) => { const el = $(id); if (el) el.value = ''; });
 
     try {
-      const params = new URLSearchParams({ q, listingType });
+      const params = new URLSearchParams({ listingType });
+      if (q)         params.set('q', q);
+      if (seller)    params.set('seller', seller);
       if (category)  params.set('category', category);
       if (condition) params.set('condition', condition);
       if (minPrice)  params.set('minPrice', minPrice);
       if (maxPrice)  params.set('maxPrice', maxPrice);
+      if (includeIlliquid) params.set('includeIlliquid', 'true');
 
       const res = await guardedFetch(`/api/opportunities/search?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
@@ -486,30 +625,245 @@
   function bindOpportunitySearch() {
     on('opp-find-btn', 'click', findOpportunities);
     on('opp-search-input',    'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
+    on('opp-seller-input',    'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
     on('opp-category-input',  'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
     on('opp-min-price-input', 'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
     on('opp-max-price-input', 'keydown', e => { if (e.key === 'Enter') findOpportunities(); });
     OPP_FILTERS.forEach(([id]) => on(id, 'change', applyOpportunityFilters));
+    OPP_RANGE_FILTERS.forEach(([id]) => on(id, 'input', applyOpportunityFilters));
+    on('opp-sort-select', 'change', applyOpportunityFilters);
     on('opp-close', 'click', closeOpportunitySection);
+    on('opp-terapeak-connect', 'click', terapeakConnect);
+    on('opp-terapeak-disconnect', 'click', terapeakDisconnect);
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && !$('opportunity-section')?.classList.contains('hidden')) closeOpportunitySection();
     });
   }
 
-  function bindGemsSection() {
-    on('gems-close', 'click', closeGemsSection);
-    on('gems-upgrade-btn', 'click', () => { location.hash = 'license'; });
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && !$('gems-section')?.classList.contains('hidden')) closeGemsSection();
+  // ── Supplier File Analyzer (dropship profit calculator) ─────────────────
+  let oppSupplierImageBase64 = '';
+  let oppSupplierMimeType = 'image/jpeg';
+
+  function bindSupplierAnalyzer() {
+    const dropZone  = $('opp-supplier-drop-zone');
+    const fileInput = $('opp-supplier-file-input');
+
+    dropZone?.addEventListener('click', e => {
+      if (e.target !== fileInput) fileInput?.click();
+    });
+    dropZone?.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone?.addEventListener('dragleave', e => {
+      if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over');
+    });
+    dropZone?.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0] ||
+        [...(e.dataTransfer.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+      if (file) oppSupplierLoadFile(file);
+    });
+    fileInput?.addEventListener('change', () => {
+      if (fileInput.files[0]) oppSupplierLoadFile(fileInput.files[0]);
+    });
+    dropZone?.addEventListener('beforeinput', e => e.preventDefault());
+    dropZone?.addEventListener('paste', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const imageItem = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+      const file = imageItem?.getAsFile();
+      if (file) oppSupplierLoadFile(file, 'Pasted supplier file');
+    });
+
+    on('opp-supplier-btn-clear', 'click', oppSupplierClear);
+    on('opp-supplier-btn-reanalyze', 'click', () => oppSupplierAnalyze());
+  }
+
+  function oppSupplierLoadFile(file, label = file.name || 'Supplier file') {
+    const mime = file.type || 'image/png';
+    if (mime && !mime.startsWith('image/')) return;
+    oppSupplierMimeType = mime;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      oppSupplierImageBase64 = ev.target.result.split(',')[1];
+      $('opp-supplier-preview-img').src = ev.target.result;
+      $('opp-supplier-drop-zone')?.classList.add('hidden');
+      $('opp-supplier-preview-wrap')?.classList.remove('hidden');
+      addActivity('Supplier file loaded', label);
+      oppSupplierAnalyze();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function oppSupplierClear() {
+    oppSupplierImageBase64 = '';
+    $('opp-supplier-drop-zone')?.classList.remove('hidden');
+    $('opp-supplier-preview-wrap')?.classList.add('hidden');
+    $('opp-supplier-results')?.classList.add('hidden');
+    $('opp-supplier-btn-reanalyze')?.classList.add('hidden');
+    if ($('opp-supplier-file-input')) $('opp-supplier-file-input').value = '';
+  }
+
+  async function oppSupplierAnalyze() {
+    if (!oppSupplierImageBase64) return;
+    const results = $('opp-supplier-results');
+    const summary = $('opp-supplier-summary');
+    const list    = $('opp-supplier-list');
+    const reanalyzeBtn = $('opp-supplier-btn-reanalyze');
+
+    results?.classList.remove('hidden');
+    if (summary) summary.innerHTML = 'Reading the file and checking sold comps for each product — this can take a minute…';
+    if (list) list.innerHTML = '';
+    if (reanalyzeBtn) reanalyzeBtn.classList.add('hidden');
+
+    try {
+      const res = await guardedFetch('/api/opportunities/analyze-supplier-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: oppSupplierImageBase64, mimeType: oppSupplierMimeType })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Analysis failed');
+      renderSupplierResults(data);
+    } catch (err) {
+      if (summary) summary.textContent = `Analysis failed: ${err.message}`;
+    } finally {
+      reanalyzeBtn?.classList.remove('hidden');
+    }
+  }
+
+  function confidenceLabel(score) {
+    if (score == null) return null;
+    if (score >= 70) return 'High';
+    if (score >= 40) return 'Medium';
+    return 'Low';
+  }
+
+  function buildComparableRowHtml(c) {
+    const titleCell = c.itemUrl
+      ? `<a href="${esc(c.itemUrl)}" target="_blank" rel="noopener">${esc(c.title)}</a>`
+      : esc(c.title);
+    return `<tr>
+      <td>${titleCell}</td>
+      <td>$${(c.soldPrice ?? 0).toFixed(2)}</td>
+      <td>${c.shipping != null ? `$${c.shipping.toFixed(2)}` : '—'}</td>
+      <td>${esc(c.condition || '—')}</td>
+      <td>${c.soldDate ? esc(new Date(c.soldDate).toLocaleDateString()) : '—'}</td>
+      <td>${c.matchScore ?? '—'}</td>
+    </tr>`;
+  }
+
+  function buildSupplierRowHtml(it, idx) {
+    const hasPricing  = it.estimatedProfitPercent != null;
+    const profitClass = !hasPricing ? 'flat' : it.estimatedProfitPercent > 0 ? 'good' : 'bad';
+    const profitPct    = hasPricing ? `${it.estimatedProfitPercent > 0 ? '+' : ''}${it.estimatedProfitPercent}%` : '—';
+    const profitAmount = it.estimatedProfit == null ? '' : ` (${it.estimatedProfit > 0 ? '+' : ''}$${Math.abs(it.estimatedProfit).toFixed(2)})`;
+    const resalePrice = it.estimatedResalePrice ?? it.ebaySoldMedian ?? it.ebaySoldAverage;
+
+    // Generic labels only — never mention the underlying database/table/provider.
+    let sourceTag;
+    if (it.localDataAvailable) {
+      const conf = confidenceLabel(it.confidenceScore);
+      sourceTag = `<span class="opp-verified-tag opp-verified">✓ Local market research match${conf ? ` · ${conf} confidence` : ''}</span>`;
+    } else if (it.isVerified) {
+      sourceTag = '<span class="opp-verified-tag opp-verified">✓ Sold-history match</span>';
+    } else {
+      sourceTag = `<span class="opp-verified-tag opp-estimate">${esc(it.localDataMessage || 'No reliable sold-history matches found.')}</span>`;
+    }
+
+    const comparables = it.comparableListings || [];
+    const compToggle = comparables.length > 0
+      ? `<button type="button" class="btn btn-ghost small opp-comp-toggle" data-comp-idx="${idx}">View comparable sold listings (${comparables.length})</button>`
+      : '';
+    const compPanel = comparables.length > 0
+      ? `<div class="opp-comp-panel hidden" id="opp-comp-panel-${idx}">
+          <table class="opp-comp-table">
+            <thead><tr><th>Title</th><th>Sold price</th><th>Shipping</th><th>Condition</th><th>Sold date</th><th>Match</th></tr></thead>
+            <tbody>${comparables.map(buildComparableRowHtml).join('')}</tbody>
+          </table>
+        </div>`
+      : '';
+
+    return `<div class="opp-result-row opp-supplier-row">
+      <div class="opp-result-info">
+        <div class="opp-result-title" title="${esc(it.productName)}">${esc(it.productName)}</div>
+        <div class="opp-result-meta">${esc(it.notes || it.searchQuery)}</div>
+        ${it.localDataAvailable ? `<div class="opp-result-meta">${it.comparableCount} comparable sold listing${it.comparableCount === 1 ? '' : 's'} found in local market research</div>` : ''}
+        ${compToggle}
+        ${compPanel}
+      </div>
+      <div class="opp-result-costs">
+        <div class="opp-cost-line"><span>Wholesale cost</span><strong>${it.wholesaleCostUsd > 0 ? `$${it.wholesaleCostUsd.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Estimated resale price</span><strong>${resalePrice != null ? `$${resalePrice.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Average sold price</span><strong>${it.ebaySoldAverage != null ? `$${it.ebaySoldAverage.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Median sold price</span><strong>${it.ebaySoldMedian != null ? `$${it.ebaySoldMedian.toFixed(2)}` : '—'}</strong></div>
+        ${it.sellThroughPercent != null ? `<div class="opp-cost-line"><span>Sell-through</span><strong>${it.sellThroughPercent}%</strong></div>` : ''}
+        ${it.liquidityLevel != null
+          ? `<div class="opp-cost-line"><span>Est. time to sell</span><strong>${it.liquidityLevel}${it.estimatedDaysToSell != null ? ` · ~${it.estimatedDaysToSell}d` : ''}</strong></div>`
+          : it.liquidityMessage ? `<div class="opp-cost-line"><span>Est. time to sell</span><strong class="opp-liquidity-unknown">${esc(it.liquidityMessage)}</strong></div>` : ''}
+      </div>
+      <div class="opp-result-value">
+        <div class="opp-cost-line"><span>eBay fees (est.)</span><strong>${it.estimatedFees != null ? `$${it.estimatedFees.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Shipping (est.)</span><strong>${it.avgShipping != null ? `$${it.avgShipping.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>Quick-sale / High-price target</span><strong>${it.quickSalePrice != null ? `$${it.quickSalePrice.toFixed(2)}` : '—'} / ${it.highPriceTarget != null ? `$${it.highPriceTarget.toFixed(2)}` : '—'}</strong></div>
+        <div class="opp-cost-line"><span>ROI / Margin</span><strong>${it.roiPercent != null ? `${it.roiPercent}%` : '—'} / ${it.marginPercent != null ? `${it.marginPercent}%` : '—'}</strong></div>
+        <div class="opp-cost-line profit ${profitClass}"><span>Est. net profit / ROI</span><strong>${profitPct}${profitAmount}</strong></div>
+        ${sourceTag}
+        ${(it.warnings || []).length > 0 ? `<ul class="opp-score-explanation">${it.warnings.map(w => `<li class="opp-warning">⚠ ${esc(w)}</li>`).join('')}</ul>` : ''}
+      </div>
+      <div class="opp-result-score">
+        ${it.opportunityScore != null ? `<div class="opp-score-badge ${it.opportunityScore >= 60 ? 'good' : it.opportunityScore >= 35 ? 'mid' : 'bad'}">${it.opportunityScore}</div><span class="opp-result-score-label">Score</span>` : ''}
+        <a href="${esc(it.terapeakUrl)}" target="_blank" rel="noopener" class="btn btn-ghost small">Research ↗</a>
+        <button type="button" class="btn btn-primary small" onclick="window.__oppListSupplierItem(${JSON.stringify(it.productName).replace(/"/g, '&quot;')})">List this</button>
+      </div>
+    </div>`;
+  }
+
+  function renderSupplierResults(data) {
+    const summary = $('opp-supplier-summary');
+    const list = $('opp-supplier-list');
+    if (!summary || !list) return;
+
+    const items = data.items || [];
+    if (items.length === 0) {
+      summary.innerHTML = 'No products could be extracted from that file. Try a clearer photo of a price list or product.';
+      list.innerHTML = '';
+      return;
+    }
+
+    const priced = data.productsPriced || 0;
+    summary.innerHTML = `Extracted <strong>${data.productsExtracted}</strong> product${data.productsExtracted === 1 ? '' : 's'} — ` +
+      `<strong>${priced}</strong> priced against real sold comps. Ranked by estimated profit.`;
+    list.innerHTML = items.map(buildSupplierRowHtml).join('');
+
+    list.querySelectorAll('.opp-comp-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const panel = $(`opp-comp-panel-${btn.dataset.compIdx}`);
+        panel?.classList.toggle('hidden');
+      });
     });
   }
+
+  // Jumps to AI Listing and reuses the existing quick-fill-by-name pipeline so a profitable
+  // supplier find goes straight to a drafted listing without any new listing-creation code.
+  window.__oppListSupplierItem = function (productName) {
+    location.hash = 'ai';
+    setTimeout(() => {
+      const input = $('nl-quickfill-input');
+      if (input) {
+        input.value = productName;
+        nlQuickFillByName();
+      }
+    }, 150);
+  };
 
   function goHome() { location.hash = 'dashboard'; }
 
   function bindHomeButtons() {
     on('nl-home',  'click', goHome);
     on('opp-home', 'click', goHome);
-    on('gems-home', 'click', goHome);
   }
 
   async function activateLicensePage() {
@@ -1511,6 +1865,15 @@
     return row;
   }
 
+  // A placeholder/SAMPLE listing (see PlaceholderListings.cs) has no real offerId and a
+  // fabricated listingId — it was never actually published to eBay, so it must never be
+  // eligible for a live revision call (EbayService.UpdateListingAsync would otherwise send
+  // ReviseInventoryStatus for a listingId that doesn't exist on eBay).
+  function canReviseOnEbay(listing) {
+    if ((listing.status || '').toUpperCase() === 'SAMPLE') return false;
+    return !!(listing.offerId || (listing.listingId && listing.sku));
+  }
+
   function loadListingIntoForm(listing, sourceEl) {
     document.querySelectorAll('.listing-card.active, .listings-table tr.active').forEach(c => c.classList.remove('active'));
     sourceEl?.classList?.add('active');
@@ -1518,13 +1881,13 @@
     activeOfferId = listing.offerId || '';
     activeListingId = listing.listingId || '';
     activeSku = listing.sku || '';
+    activeListingStatus = listing.status || '';
     pendingDraftPayload = null;
     hideDraftPreview();
 
     $('btn-post')?.classList.add('hidden');
     $('btn-create-ebay-draft')?.classList.add('hidden');
-    $('btn-update')?.classList.remove('hidden');
-    $('btn-revise-ebay')?.classList.toggle('hidden', !canReviseOnEbay(listing));
+    $('btn-update')?.classList.toggle('hidden', !canReviseOnEbay(listing));
     $('btn-new-listing')?.classList.remove('hidden');
 
     const d = listing.data || {};
@@ -1793,6 +2156,12 @@
     renderDraftTabs();
   }
 
+  // Saves straight to the server-managed Desktop\eBayListing folder via DraftStore (the same
+  // endpoint the Bulk Catalog Import already uses) instead of letting the browser's native save
+  // dialog put the file wherever the user navigates to. The dialog approach (previously
+  // window.showSaveFilePicker with startIn:'desktop') only opens ON the Desktop — it doesn't
+  // force saving INTO the eBayListing subfolder DraftStore actually scans, so a draft saved via
+  // the dialog could land right next to that folder and still be invisible to "Open All Drafts".
   async function saveDraftLocal() {
     captureCurrentTab();
     const tab = draftTabs.find(t => t.id === activeDraftTabId);
@@ -1801,17 +2170,9 @@
     const btn = $('nl-btn-save-local');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
-    // Ensure Desktop\eBayListing folder exists before the dialog opens
-    await fetch('/api/local-drafts/ensure-folder').catch(() => {});
-
-    const suggestedName = (tab.title || 'draft')
-      .replace(/[^a-zA-Z0-9 _\-]/g, '').trim()
-      .replace(/\s+/g, '_').slice(0, 60) + '.json';
-
     const payload = {
-      filename: suggestedName,
+      filename: tab.filename || null,
       title: tab.title,
-      savedAt: new Date().toISOString(),
       data: tab.data,
       imageBase64: tab.imageBase64 || null,
       mimeType: tab.mimeType || 'image/jpeg',
@@ -1819,20 +2180,16 @@
     };
 
     try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName,
-        startIn: 'desktop',
-        types: [{ description: 'eBay Draft (.json)', accept: { 'application/json': ['.json'] } }]
+      const res = await fetch('/api/local-drafts/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
+      if (!res.ok) throw new Error('Save failed (HTTP ' + res.status + ')');
+      const { filename } = await res.json();
 
-      const writable = await handle.createWritable();
-      await writable.write(JSON.stringify(payload, null, 2));
-      await writable.close();
-
-      tab.fileHandle = handle;
-      tab.filename   = handle.name;
-      tab.saved      = true;
-      addActivity('Draft saved', handle.name);
+      tab.filename = filename;
+      tab.saved    = true;
+      addActivity('Draft saved', filename + ' — Desktop\\eBayListing\\' + filename);
       renderDraftTabs();
       if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = '💾 Save Draft'; } }, 1200); }
 
@@ -1840,11 +2197,6 @@
       addNewDraftTab();
 
     } catch (err) {
-      if (err.name === 'AbortError') {
-        // User cancelled — just re-enable
-        if (btn) { btn.disabled = false; btn.textContent = '💾 Save Draft'; }
-        return;
-      }
       if (btn) { btn.disabled = false; btn.textContent = '💾 Save Draft'; }
       alert('Save failed: ' + err.message);
     }
@@ -1902,6 +2254,13 @@
       const file = imageItem.getAsFile();
       if (!file) return;
       e.preventDefault();
+      // Route to whichever paste-aware page is actually on screen — pasting while the
+      // Opportunity Finder is open should feed the Supplier File Analyzer, not silently
+      // jump to the AI Listing modal.
+      if (!$('opportunity-section')?.classList.contains('hidden')) {
+        oppSupplierLoadFile(file, 'Pasted supplier file');
+        return;
+      }
       openNewListingModal();
       nlLoadFile(file, 'Pasted screenshot');
     });
@@ -1934,8 +2293,8 @@
         if (arriving === 'preview') nlSyncDescPreview();
       });
     });
-    on('nl-description', 'input', () => { nlSyncDescPreview(); nlUpdateDescCount(); });
-    on('nl-desc-text', 'input', nlUpdateDescCount);
+    on('nl-description', 'input', () => { nlSyncDescPreview(); nlUpdateDescCount(); $('nl-description').classList.remove('field-flagged'); $('nl-desc-preview')?.classList.remove('field-flagged'); });
+    on('nl-desc-text', 'input', () => { nlUpdateDescCount(); $('nl-desc-text').classList.remove('field-flagged'); });
     on('nl-close', 'click', closeNewListingModal);
     on('nl-btn-cancel', 'click', closeNewListingModal);
     on('nl-btn-save-local', 'click', saveDraftLocal);
@@ -1948,7 +2307,7 @@
     on('nl-format', 'change', e => {
       $('nl-duration-wrap').style.display = e.target.value === 'AUCTION' ? '' : 'none';
     });
-    on('nl-title', 'input', () => nlUpdateCharCount('nl-title', 'nl-title-count', 80));
+    on('nl-title', 'input', () => { nlUpdateCharCount('nl-title', 'nl-title-count', 80); $('nl-title').classList.remove('field-flagged'); });
     on('nl-subtitle', 'input', () => nlUpdateCharCount('nl-subtitle', 'nl-subtitle-count', 55));
 
     bindCategorySearch('nl-category', 'nl-category-id', 'nl-category-dropdown', 'nl-cat-selected', 'nl-cat-selected-name', 'nl-cat-id-badge', 'nl-cat-clear');
@@ -3234,6 +3593,75 @@
     counter.style.color = len > max * .9 ? 'var(--danger)' : '';
   }
 
+  // Terms eBay's own generic "improper words / violation of eBay policy" rejection commonly
+  // fires on — mirrors the denylist ClaudeService already avoids when generating descriptions
+  // (see HtmlTemplateInstructions / _contactPat in ClaudeService.cs). eBay's error text never
+  // names the actual offending word, so this is a best-effort guess at WHERE to look, not a
+  // guarantee of finding the exact match — eBay's real filter is broader and undocumented.
+  const EBAY_FLAGGED_TERMS = ['guarantee', 'guaranteed', 'warranty', 'best price', 'lowest price', 'click here'];
+  const EBAY_CONTACT_PATTERN =
+    /(whatsapp\s*[:+]?\s*\+?\d|telegram\s*[:@]|wechat\s*[:@]|[\w.+-]+@[\w-]+\.[a-z]{2,}|\+?1?[\s.-]?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4})/i;
+  const EBAY_POLICY_ERROR_PATTERN = /improper words|violation of eBay policy|cannot be listed or modified/i;
+
+  function nlFindFlaggedTerms(text) {
+    if (!text) return [];
+    const found = [];
+    const lower = text.toLowerCase();
+    for (const term of EBAY_FLAGGED_TERMS) if (lower.includes(term)) found.push(term);
+    const contactMatch = text.match(EBAY_CONTACT_PATTERN);
+    if (contactMatch) found.push(contactMatch[0].trim());
+    return found;
+  }
+
+  function nlClearPolicyHighlights() {
+    ['nl-title', 'nl-desc-text', 'nl-description', 'nl-desc-preview'].forEach(id => $(id)?.classList.remove('field-flagged'));
+  }
+
+  // Called after a publish/save failure — if the error looks like eBay's generic content-policy
+  // rejection, scans Title and Description for known-flagged phrases and visually flags whichever
+  // field(s) actually contain something suspicious, so the user isn't left guessing which of two
+  // fields (or which word in a 4000-character description) to comb through by hand.
+  function nlHighlightPolicyIssues(errorText) {
+    nlClearPolicyHighlights();
+    if (!EBAY_POLICY_ERROR_PATTERN.test(errorText || '')) return;
+
+    const titleText = $('nl-title')?.value || '';
+    const descText  = nlHtmlToText($('nl-description')?.value || '') || $('nl-desc-text')?.value || '';
+    const titleHits = nlFindFlaggedTerms(titleText);
+    const descHits  = nlFindFlaggedTerms(descText);
+
+    let note = '';
+    let focusEl = null;
+
+    if (titleHits.length) {
+      $('nl-title')?.classList.add('field-flagged');
+      focusEl = focusEl || $('nl-title');
+      note += `\n\n⚠ Possible flagged text in Title: "${titleHits.join('", "')}"`;
+    }
+    if (descHits.length) {
+      $('nl-desc-text')?.classList.add('field-flagged');
+      $('nl-description')?.classList.add('field-flagged');
+      $('nl-desc-preview')?.classList.add('field-flagged');
+      focusEl = focusEl || $('nl-desc-text');
+      note += `\n\n⚠ Possible flagged text in Description: "${descHits.join('", "')}"`;
+    }
+    if (!titleHits.length && !descHits.length) {
+      $('nl-title')?.classList.add('field-flagged');
+      $('nl-desc-text')?.classList.add('field-flagged');
+      $('nl-description')?.classList.add('field-flagged');
+      $('nl-desc-preview')?.classList.add('field-flagged');
+      focusEl = $('nl-title');
+      note += `\n\n⚠ eBay didn't say which word — Title and Description are both flagged below for review. Common triggers: guarantee/warranty claims, contact info (phone/email/WhatsApp/Telegram), off-eBay sale language.`;
+    }
+
+    if (note) {
+      const el = $('nl-result-msg');
+      if (el) el.innerHTML += esc(note).replace(/\n/g, '<br>');
+    }
+    focusEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    focusEl?.focus();
+  }
+
   function nlSetResult(type, text) {
     const el = $('nl-result-msg');
     if (!el) return;
@@ -3476,6 +3904,7 @@
         nlSetResult('error',
           'Failed' + where + ': ' + short
           + (details !== short ? '\n\nDetails: ' + details : ''));
+        nlHighlightPolicyIssues(short + ' ' + details);
         addActivity(mode === 'publish' ? 'Publish failed' : 'Save draft failed',
           'HTTP ' + res.status + ': ' + short);
         return;
@@ -3642,8 +4071,6 @@
     on('pg-imggen-test', 'click', testPgImggenConnection);
     on('pg-terapeak-connect', 'click', terapeakConnect);
     on('pg-terapeak-disconnect', 'click', terapeakDisconnect);
-    on('opp-terapeak-connect', 'click', terapeakConnect);
-    on('opp-terapeak-disconnect', 'click', terapeakDisconnect);
     on('pg-imggen-guide', 'click', openImageGenSetup);
     on('pg-imggen-load-models', 'click', () => {
       const endpoint = $('pg-imggen-endpoint')?.value.trim();
@@ -3828,60 +4255,35 @@
       activeOfferId = '';
       activeListingId = '';
       activeSku = '';
+      activeListingStatus = '';
       pendingDraftPayload = null;
       hideDraftPreview();
       document.querySelectorAll('.listing-card.active').forEach(c => c.classList.remove('active'));
       $('btn-post')?.classList.remove('hidden');
       $('btn-create-ebay-draft')?.classList.add('hidden');
       $('btn-update')?.classList.add('hidden');
-      $('btn-revise-ebay')?.classList.add('hidden');
       $('btn-new-listing')?.classList.add('hidden');
       $('form-section')?.classList.add('hidden');
       showAiSection();
       hideResult();
     });
 
+    // Pushes straight to the live eBay listing — same call the New Listing "Publish to eBay"
+    // button uses under the hood (UpdateListingAsync/ReviseInventoryStatusAsync in
+    // EbayService.cs), no separate "local only" step first. UpdateListingAsync picks the right
+    // eBay API automatically: the Inventory API if this listing has an offerId (created through
+    // this app), or the Trading API's ReviseInventoryStatus (price/quantity) if it only has a
+    // ListingId (imported from eBay directly, which is most of a seller's existing catalog).
     on('btn-update', 'click', async () => {
-      const ok = window.confirm('Save these changes locally? This will not revise the live eBay listing.');
-      if (!ok) return;
+      if (!canReviseOnEbay({ offerId: activeOfferId, listingId: activeListingId, sku: activeSku, status: activeListingStatus })) {
+        showResult('error', 'This is a sample/placeholder listing — it was never published to eBay, so there is nothing to update there.');
+        return;
+      }
+      if (!confirm('This will push these changes directly to your live eBay listing. Continue?')) return;
 
       const btn = $('btn-update');
       btn.disabled = true;
-      btn.textContent = 'Saving locally...';
-      hideResult();
-
-      const payload = buildPayload();
-      payload.offerId = activeOfferId;
-      payload.listingId = activeListingId;
-      payload.sku = activeSku;
-
-      try {
-        const res = await fetch('/api/local-listings/save-edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const result = await res.json();
-        applyLocalEdit(payload, result.savedAt);
-        showResult('success', 'Listing changes saved locally. No live eBay listing was revised.');
-        addActivity('Local edit saved', payload.title || activeSku);
-      } catch (err) {
-        showResult('error', `Local save failed: ${esc(err.message)}`);
-        addActivity('Local save failed', err.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Save Changes';
-      }
-    });
-
-    on('btn-revise-ebay', 'click', async () => {
-      const ok = window.confirm('Manual confirmation required: revise the live eBay listing now using the current form values?');
-      if (!ok) return;
-
-      const btn = $('btn-revise-ebay');
-      btn.disabled = true;
-      btn.textContent = 'Revising eBay...';
+      btn.textContent = 'Publishing to eBay…';
       hideResult();
 
       const payload = buildPayload();
@@ -3897,15 +4299,27 @@
           body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error(await res.text());
-        showResult('success', 'eBay listing revised after manual confirmation.');
-        addActivity('eBay listing revised', payload.title || activeSku);
-        loadListings('Listings refreshed after eBay revision');
+
+        // Keep the local dashboard cache in sync too — best-effort, doesn't affect the
+        // already-successful eBay update if it fails for some reason.
+        try {
+          const editRes = await fetch('/api/local-listings/save-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (editRes.ok) applyLocalEdit(payload, (await editRes.json()).savedAt);
+        } catch { /* non-fatal */ }
+
+        showResult('success', '✓ Published to eBay live.');
+        addActivity('eBay listing updated', payload.title || activeSku);
+        loadListings('Listings refreshed after eBay update');
       } catch (err) {
-        showResult('error', `eBay revision failed: ${esc(err.message)}`);
-        addActivity('eBay revision failed', err.message);
+        showResult('error', `eBay update failed: ${esc(err.message)}`);
+        addActivity('eBay update failed', err.message);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Revise eBay';
+        btn.textContent = 'Save Changes';
       }
     });
 
@@ -4186,11 +4600,6 @@
     if (upper === 'LOCAL_EDIT') return 'status-chip local';
     if (!upper || upper === 'DRAFT') return 'status-chip review';
     return 'status-chip';
-  }
-
-  function canReviseOnEbay(listing) {
-    if (!listing.offerId || !listing.sku) return false;
-    return (listing.status || '').toUpperCase() !== 'SAMPLE';
   }
 
   function money(value) {

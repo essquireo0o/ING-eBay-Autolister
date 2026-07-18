@@ -426,6 +426,204 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         return items;
     }
 
+    // Cheap "how many are actually listed right now" check for the Low Competition insight —
+    // limit=1 means eBay still returns the real total match count without paying for a full
+    // page of results, and it's a normal Browse API call (not Terapeak), so it costs nothing
+    // against the scrape budget.
+    public async Task<int> GetActiveListingCountAsync(string query, string? category = null)
+    {
+        var token = await GetBrowseApplicationTokenAsync();
+        var client = httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        client.DefaultRequestHeaders.Add("X-EBAY-C-MARKETPLACE-ID", "EBAY_US");
+
+        var q = string.IsNullOrWhiteSpace(category) ? QuotePhrase(query) : $"{QuotePhrase(query)} {QuotePhrase(category)}";
+        var url = "https://api.ebay.com/buy/browse/v1/item_summary/search" +
+                   $"?q={Uri.EscapeDataString(q)}&filter={Uri.EscapeDataString("buyingOptions:{AUCTION|FIXED_PRICE}")}&limit=1";
+
+        var response = await client.GetAsync(url);
+        if (!response.IsSuccessStatusCode) return 0;
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.TryGetProperty("total", out var total) && total.TryGetInt32(out var totalVal) ? totalVal : 0;
+    }
+
+    // Browse API's item_summary/search always requires q/category_ids/epid/gtin — there is no way
+    // to ask it for "everything a seller has" without also supplying a keyword (confirmed live:
+    // filter=sellers alone comes back "errorId 12001 ... must have a valid q ..."). eBay's newer
+    // Finding API (svcs.ebay.com) — the traditional way to do a keyword-less Seller lookup — is
+    // returning a blanket 503 from eBay's edge for every request now (verified directly, not an
+    // auth/params issue on this end), so it's gone too. Trading API's GetSellerList is what's
+    // left: it accepts a UserID for ANY seller (not just the caller's own account, confirmed live
+    // against a real third-party seller) and needs no extra credential beyond the same IAF token
+    // GetListingsAsync already uses.
+    public async Task<List<EbayOpportunityItem>> SearchBySellerAsync(
+        string sellerUsername, int limit = 50, string? condition = null,
+        decimal? minPrice = null, decimal? maxPrice = null, string listingType = "BOTH")
+    {
+        var c = creds.Get();
+        var token = await GetOrRefreshTokenAsync();
+        var entriesPerPage = Math.Clamp(limit, 1, 200);
+        var sellerFeedbackScore = await GetSellerFeedbackScoreAsync(sellerUsername, token, c);
+
+        // Filter by EndTime, not StartTime: GTC (Good 'Til Cancelled) listings — most of an
+        // established seller's active inventory — keep their original StartTime but roll
+        // EndTime forward on every auto-renewal, so a StartTime window only ever catches
+        // listings created recently. An EndTime window from "now" out to +119 days catches
+        // every currently-active listing regardless of how long ago it was first listed,
+        // since an ended listing's EndTime is always in the past.
+        var xml =
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <UserID>{System.Security.SecurityElement.Escape(sellerUsername)}</UserID>
+              <EndTimeFrom>{DateTime.UtcNow:o}</EndTimeFrom>
+              <EndTimeTo>{DateTime.UtcNow.AddDays(119):o}</EndTimeTo>
+              <Pagination>
+                <EntriesPerPage>{entriesPerPage}</EntriesPerPage>
+                <PageNumber>1</PageNumber>
+              </Pagination>
+              <GranularityLevel>Fine</GranularityLevel>
+              <DetailLevel>ReturnAll</DetailLevel>
+            </GetSellerListRequest>
+            """;
+
+        var client = httpClientFactory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, TradingEndpoint)
+        {
+            Content = new StringContent(xml, Encoding.UTF8, "text/xml")
+        };
+        request.Headers.Add("X-EBAY-API-SITEID", "0");
+        request.Headers.Add("X-EBAY-API-COMPATIBILITY-LEVEL", "967");
+        request.Headers.Add("X-EBAY-API-CALL-NAME", "GetSellerList");
+        request.Headers.Add("X-EBAY-API-APP-NAME",  c.EbayClientId);
+        request.Headers.Add("X-EBAY-API-DEV-NAME",  c.EbayDevId);
+        request.Headers.Add("X-EBAY-API-CERT-NAME", c.EbayClientSecret);
+        request.Headers.Add("X-EBAY-API-IAF-TOKEN", token);
+
+        var response = await client.SendAsync(request);
+        var xmlBody  = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"eBay seller search HTTP {(int)response.StatusCode}: {xmlBody[..Math.Min(500, xmlBody.Length)]}");
+
+        var doc  = XDocument.Parse(xmlBody);
+        var root = doc.Root ?? throw new Exception("Empty response from eBay seller search.");
+        var ack  = root.Element(EbayNs + "Ack")?.Value ?? "";
+        if (ack is "Failure")
+        {
+            var errors = root.Descendants(EbayNs + "Errors")
+                .Select(e => $"[{e.Element(EbayNs + "ErrorCode")?.Value}] {e.Element(EbayNs + "ShortMessage")?.Value}")
+                .ToList();
+            throw new Exception($"eBay seller search failed: {string.Join("; ", errors)}");
+        }
+
+        var minPriceFilter = minPrice ?? 0m;
+        var maxPriceFilter = maxPrice ?? decimal.MaxValue;
+        var items = new List<EbayOpportunityItem>();
+
+        foreach (var item in root.Descendants(EbayNs + "Item"))
+        {
+            var listingDetails = item.Element(EbayNs + "ListingDetails");
+            var sellingStatus  = item.Element(EbayNs + "SellingStatus");
+            var shippingCost   = item.Element(EbayNs + "ShippingDetails")?
+                .Element(EbayNs + "ShippingServiceOptions")?
+                .Element(EbayNs + "ShippingServiceCost")?.Value;
+
+            var priceStr = sellingStatus?.Element(EbayNs + "ConvertedCurrentPrice")?.Value
+                         ?? sellingStatus?.Element(EbayNs + "CurrentPrice")?.Value;
+            decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var price);
+            if (price < minPriceFilter || price > maxPriceFilter) continue;
+
+            decimal.TryParse(shippingCost, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var shipCost);
+
+            var rawListingType = item.Element(EbayNs + "ListingType")?.Value ?? "";
+            var buyingOption = rawListingType.Contains("Auction", StringComparison.OrdinalIgnoreCase) ? "AUCTION" : "FIXED_PRICE";
+            if (listingType == "AUCTION" && buyingOption != "AUCTION") continue;
+            if (listingType == "FIXED_PRICE" && buyingOption != "FIXED_PRICE") continue;
+
+            if (!string.IsNullOrWhiteSpace(condition))
+            {
+                var conditionDisplay = item.Element(EbayNs + "ConditionDisplayName")?.Value ?? "";
+                var matchesCondition = condition.ToUpperInvariant() switch
+                {
+                    "NEW"         => conditionDisplay.Contains("New", StringComparison.OrdinalIgnoreCase),
+                    "USED"        => conditionDisplay.Contains("Used", StringComparison.OrdinalIgnoreCase) || conditionDisplay.Contains("Pre-owned", StringComparison.OrdinalIgnoreCase),
+                    "REFURBISHED" => conditionDisplay.Contains("Refurbished", StringComparison.OrdinalIgnoreCase) || conditionDisplay.Contains("Certified", StringComparison.OrdinalIgnoreCase),
+                    "FOR_PARTS"   => conditionDisplay.Contains("parts", StringComparison.OrdinalIgnoreCase) || conditionDisplay.Contains("not working", StringComparison.OrdinalIgnoreCase),
+                    _             => true
+                };
+                if (!matchesCondition) continue;
+            }
+
+            DateTime? endDate = DateTime.TryParse(listingDetails?.Element(EbayNs + "EndTime")?.Value,
+                null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var edVal)
+                ? edVal : null;
+
+            int.TryParse(sellingStatus?.Element(EbayNs + "BidCount")?.Value, out var bidCount);
+
+            items.Add(new EbayOpportunityItem
+            {
+                Title               = item.Element(EbayNs + "Title")?.Value ?? "",
+                Price               = price,
+                ShippingCost        = shipCost,
+                Url                 = listingDetails?.Element(EbayNs + "ViewItemURL")?.Value ?? "",
+                ImageUrl            = item.Element(EbayNs + "PictureDetails")?.Element(EbayNs + "GalleryURL")?.Value ?? "",
+                EndDate             = endDate,
+                SellerUsername      = sellerUsername,
+                SellerFeedbackScore = sellerFeedbackScore,
+                BuyingOption        = buyingOption,
+                BidCount            = bidCount,
+            });
+        }
+
+        return items;
+    }
+
+    // GetSellerList's <Seller> block describes the API caller's own account, not the seller
+    // being queried, so it can't be used for a third-party seller's feedback score. GetUser
+    // takes any UserID and returns that account's real <FeedbackScore>. Best-effort: a failure
+    // here shouldn't fail the whole seller search, it just means trust scoring falls back to 0.
+    private async Task<int> GetSellerFeedbackScoreAsync(string sellerUsername, string token, Credentials c)
+    {
+        try
+        {
+            var xml =
+                $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+                  <UserID>{System.Security.SecurityElement.Escape(sellerUsername)}</UserID>
+                  <DetailLevel>ReturnAll</DetailLevel>
+                </GetUserRequest>
+                """;
+
+            var client = httpClientFactory.CreateClient();
+            var request = new HttpRequestMessage(HttpMethod.Post, TradingEndpoint)
+            {
+                Content = new StringContent(xml, Encoding.UTF8, "text/xml")
+            };
+            request.Headers.Add("X-EBAY-API-SITEID", "0");
+            request.Headers.Add("X-EBAY-API-COMPATIBILITY-LEVEL", "967");
+            request.Headers.Add("X-EBAY-API-CALL-NAME", "GetUser");
+            request.Headers.Add("X-EBAY-API-APP-NAME",  c.EbayClientId);
+            request.Headers.Add("X-EBAY-API-DEV-NAME",  c.EbayDevId);
+            request.Headers.Add("X-EBAY-API-CERT-NAME", c.EbayClientSecret);
+            request.Headers.Add("X-EBAY-API-IAF-TOKEN", token);
+
+            var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return 0;
+
+            var xmlBody = await response.Content.ReadAsStringAsync();
+            var doc = XDocument.Parse(xmlBody);
+            var feedbackScoreStr = doc.Root?.Element(EbayNs + "User")?.Element(EbayNs + "FeedbackScore")?.Value;
+            return int.TryParse(feedbackScoreStr, out var score) ? score : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     public async Task ProactiveTokenRefreshAsync()
     {
         var refreshToken = creds.GetRefreshToken();
@@ -1201,6 +1399,65 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
         return itemId;
     }
 
+    // ── Trading API: ReviseInventoryStatus (price/quantity-only revision) ──────
+    // Listings pulled in via GetMyeBaySelling (see GetPagedArrayAsync/GetListingsAsync) were
+    // created directly on eBay or through the Trading API, not through this app's Inventory API
+    // flow — they have a real ItemID (ListingId) but no Inventory API offerId, so
+    // UpdateListingAsync's PUT /sell/inventory/v1/offer/{offerId} call has nothing to target and
+    // can't touch them at all. ReviseInventoryStatus is the Trading API's purpose-built call for
+    // exactly this: bump price/quantity on an existing ItemID without re-submitting the whole
+    // item (title, category, policies, etc.) — same HTTP/XML/header plumbing already proven
+    // working in AddFixedPriceItemAsync above, just a much smaller payload.
+    public async Task ReviseInventoryStatusAsync(string itemId, decimal price, int quantity)
+    {
+        var token = await GetOrRefreshTokenAsync();
+        var c = creds.Get();
+
+        var xml = $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+              <InventoryStatus>
+                <ItemID>{Xe(itemId)}</ItemID>
+                <StartPrice>{price:F2}</StartPrice>
+                <Quantity>{quantity}</Quantity>
+              </InventoryStatus>
+            </ReviseInventoryStatusRequest>
+            """;
+
+        var client  = httpClientFactory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, TradingEndpoint)
+        {
+            Content = new StringContent(xml, Encoding.UTF8, "text/xml")
+        };
+        request.Headers.Add("X-EBAY-API-CALL-NAME",           "ReviseInventoryStatus");
+        request.Headers.Add("X-EBAY-API-SITEID",              "0");
+        request.Headers.Add("X-EBAY-API-COMPATIBILITY-LEVEL", "967");
+        request.Headers.Add("X-EBAY-API-APP-NAME",            c.EbayClientId);
+        request.Headers.Add("X-EBAY-API-DEV-NAME",            c.EbayDevId);
+        request.Headers.Add("X-EBAY-API-CERT-NAME",           c.EbayClientSecret);
+        request.Headers.Add("X-EBAY-API-IAF-TOKEN",           token);
+
+        var response     = await client.SendAsync(request);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        log.Add(response.IsSuccessStatusCode ? "Info" : "Warning",
+            $"ReviseInventoryStatus HTTP {(int)response.StatusCode}",
+            responseBody[..Math.Min(500, responseBody.Length)]);
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"ReviseInventoryStatus failed (HTTP {(int)response.StatusCode}): {responseBody}");
+
+        var xdoc = XDocument.Parse(responseBody);
+        var ack  = xdoc.Descendants(EbayNs + "Ack").FirstOrDefault()?.Value ?? "";
+        if (ack is "Failure")
+        {
+            var errMsg = xdoc.Descendants(EbayNs + "LongMessage").FirstOrDefault()?.Value
+                      ?? xdoc.Descendants(EbayNs + "ShortMessage").FirstOrDefault()?.Value
+                      ?? responseBody;
+            throw new Exception($"ReviseInventoryStatus failed: {errMsg}");
+        }
+    }
+
     private async Task CreateInventoryItemAsync(HttpClient client, PostListingRequest req, string sku, string? locationKey = null)
     {
         var totalOz = req.WeightLbs * 16 + req.WeightOz;
@@ -1393,6 +1650,16 @@ public class EbayService(CredentialsStore creds, IHttpClientFactory httpClientFa
 
     public async Task UpdateListingAsync(UpdateListingRequest req)
     {
+        // No Inventory API offerId means this listing wasn't created through that API (imported
+        // via GetMyeBaySelling instead — see the ReviseInventoryStatusAsync comment above for
+        // why) — the offer/{offerId} PUT below has nothing to target, so fall back to the
+        // Trading API price/quantity revision, which only needs the ItemID.
+        if (string.IsNullOrWhiteSpace(req.OfferId) && !string.IsNullOrWhiteSpace(req.ListingId))
+        {
+            await ReviseInventoryStatusAsync(req.ListingId, req.Price, req.Quantity);
+            return;
+        }
+
         var token = !string.IsNullOrWhiteSpace(req.EbayToken) ? req.EbayToken : await GetOrRefreshTokenAsync();
         var client = httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);

@@ -185,7 +185,7 @@ public class ClaudeService(CredentialsStore creds)
                 ITEM SPECIFICS:
                 - Include every applicable specific for the category — buyers filter by these
                 - For electronics: Brand, Model, MPN, Color, Connectivity, Compatible Devices, Storage, RAM, OS
-                - For clothing: Brand, Size, Color, Material, Department, Style
+                - For clothing: Brand, Size, Size Type (e.g. Regular, Big & Tall, Plus, Petite — required by eBay separately from Size), Color, Material, Department, Style, Type
                 - For collectibles: Brand, Year, Theme, Character, Set
                 - Keep every value to 4 words or fewer — no sentences, no comma-separated lists
 
@@ -245,7 +245,7 @@ public class ClaudeService(CredentialsStore creds)
             ITEM SPECIFICS:
             - Include every applicable specific for the category — buyers filter by these
             - For electronics/ASIC: Brand, Model, MPN, Hashrate, Algorithm, Power, Condition, Compatible Currency
-            - For clothing: Brand, Size, Color, Material, Department, Style
+            - For clothing: Brand, Size, Size Type (e.g. Regular, Big & Tall, Plus, Petite — required by eBay separately from Size), Color, Material, Department, Style, Type
             - For collectibles: Brand, Year, Theme, Character, Set
 
             PRICING:
@@ -282,6 +282,93 @@ public class ClaudeService(CredentialsStore creds)
 
         var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "{}";
         return DeserializeListing(text);
+    }
+
+    // ── Supplier file analysis → extracted products (dropship profit calculator) ────────────
+
+    public async Task<List<SupplierProduct>> AnalyzeSupplierFileAsync(string base64Image, string mimeType)
+    {
+        var prompt = """
+            You are an expert sourcing agent reading a supplier document. The attached image is either:
+            (a) a wholesale/OEM price list or quote sheet, possibly with multiple products, models, and
+                quantity-tier pricing (e.g. "1-100 units" vs "above 100"), or
+            (b) a single product photo with no pricing info.
+
+            Extract EVERY distinct product or model visible in the image. For each one:
+            - ProductName: the full product/model name as shown
+            - Brand: manufacturer/brand name if shown, else empty string
+            - Model: model number/variant if shown, else empty string
+            - PartNumber: manufacturer part number / SKU / MPN if shown (distinct from Model —
+              e.g. a specific board or PSU revision code), else empty string
+            - SearchQuery: a SHORT eBay-search-friendly keyword string for this exact product —
+              brand + model + the one or two specs that distinguish it (e.g. "Bitaxe Gamma 601 1.2TH"),
+              NOT the full marketing name. This is what will be used to search eBay sold listings.
+            - WholesaleCostUsd: the unit cost in US dollars for the LOWEST quantity tier shown
+              (e.g. "1-200" or "Sample 1-50", not the bulk/"above X" discount tier). If the sheet shows
+              both a RMB/CNY column and a USD column, ALWAYS use the USD column. If only RMB is shown
+              and no USD price exists anywhere for that row, convert using approximately 7.2 RMB = 1 USD.
+              If truly no price is visible for a product, use 0.
+            - Notes: 1-2 short factual specs worth showing next to the price (e.g. hashrate, power draw,
+              key differentiator) — empty string if nothing notable.
+
+            Return ONLY a valid JSON array — no markdown, no code fences, no extra text, no wrapping object:
+            [
+              {
+                "ProductName": "",
+                "Brand": "",
+                "Model": "",
+                "PartNumber": "",
+                "SearchQuery": "",
+                "WholesaleCostUsd": 0,
+                "Notes": ""
+              }
+            ]
+
+            Extract up to 15 distinct products. If the image contains only one product with no pricing
+            table, return a single-item array with WholesaleCostUsd of 0.
+            """;
+
+        var messages = new List<Message>
+        {
+            new()
+            {
+                Role = RoleType.User,
+                Content =
+                [
+                    new ImageContent
+                    {
+                        Source = new ImageSource { MediaType = mimeType, Data = base64Image }
+                    },
+                    new TextContent { Text = prompt }
+                ]
+            }
+        };
+
+        var response = await BuildClient().Messages.GetClaudeMessageAsync(new MessageParameters
+        {
+            Model     = "claude-opus-4-8",
+            MaxTokens = 4096,
+            Messages  = messages,
+            Thinking  = new ThinkingParameters { Type = ThinkingType.adaptive, Effort = ThinkingEffort.medium }
+        });
+
+        var text = response.Content.OfType<TextContent>().FirstOrDefault()?.Text ?? "[]";
+        var json = ExtractJsonArray(text);
+        var products = JsonSerializer.Deserialize<List<SupplierProduct>>(json, JsonOptions) ?? [];
+
+        foreach (var p in products)
+        {
+            p.ProductName      ??= "";
+            p.Brand             ??= "";
+            p.Model             ??= "";
+            p.PartNumber        ??= "";
+            p.SearchQuery       ??= "";
+            p.Notes             ??= "";
+            if (string.IsNullOrWhiteSpace(p.SearchQuery))
+                p.SearchQuery = string.IsNullOrWhiteSpace(p.ProductName) ? $"{p.Brand} {p.Model}".Trim() : p.ProductName;
+        }
+
+        return products.Where(p => !string.IsNullOrWhiteSpace(p.ProductName) || !string.IsNullOrWhiteSpace(p.SearchQuery)).ToList();
     }
 
     // ── Item name only → full listing (quick-fill) ──────────────────────────
@@ -332,7 +419,7 @@ public class ClaudeService(CredentialsStore creds)
                 ITEM SPECIFICS:
                 - Include every applicable specific for the category — buyers filter by these
                 - For electronics: Brand, Model, MPN, Color, Connectivity, Compatible Devices, Storage, RAM, OS
-                - For clothing: Brand, Size, Color, Material, Department, Style
+                - For clothing: Brand, Size, Size Type (e.g. Regular, Big & Tall, Plus, Petite — required by eBay separately from Size), Color, Material, Department, Style, Type
                 - For collectibles: Brand, Year, Theme, Character, Set
                 - Keep every value to 4 words or fewer — no sentences, no comma-separated lists
 
@@ -507,6 +594,22 @@ public class ClaudeService(CredentialsStore creds)
         var end = trimmed.LastIndexOf('}');
         if (start < 0 || end <= start)
             throw new JsonException("AI response did not contain a JSON object.");
+
+        return trimmed[start..(end + 1)];
+    }
+
+    private static string ExtractJsonArray(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.StartsWith("```"))
+            trimmed = trimmed[(trimmed.IndexOf('\n') + 1)..];
+        if (trimmed.EndsWith("```"))
+            trimmed = trimmed[..trimmed.LastIndexOf("```", StringComparison.Ordinal)];
+
+        var start = trimmed.IndexOf('[');
+        var end = trimmed.LastIndexOf(']');
+        if (start < 0 || end <= start)
+            throw new JsonException("AI response did not contain a JSON array.");
 
         return trimmed[start..(end + 1)];
     }

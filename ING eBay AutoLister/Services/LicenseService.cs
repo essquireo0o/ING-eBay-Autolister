@@ -29,10 +29,14 @@ public class LicenseService(CredentialsStore creds, IHttpClientFactory http)
             return _cached;
         }
 
-        // Beta / free-access keys — resolved locally, no server call needed
+        // Beta key — resolved locally, no server call needed. Grants "pro" (not "free"): the
+        // product is positioned as freeware with every feature unlocked via this key (see the
+        // "Freeware notice" in index.html — "Use key ING-BETA-2025 to activate all features"),
+        // so gating Pro-only features behind a separate paid tier check here would contradict
+        // that promise.
         if (key.Equals("ING-BETA-2025", StringComparison.OrdinalIgnoreCase))
         {
-            _cached = new LicenseStatus { Valid = true, Tier = "free", Checked = true, Message = "Beta license active." };
+            _cached = new LicenseStatus { Valid = true, Tier = "pro", Checked = true, Message = "Beta license active — all features unlocked." };
             return _cached;
         }
 

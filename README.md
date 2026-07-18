@@ -11,7 +11,7 @@
 
 1. Download `AutoListerB1.exe`
 2. Double-click — no install, no .NET required
-3. Your browser opens at `http://localhost:9330`
+3. Your browser opens at `http://localhost:9331`
 4. Enter your API keys in Settings and you're ready
 
 > Windows only. Everything is bundled inside the single exe.
@@ -176,8 +176,8 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 ## Troubleshooting
 
 **App doesn't open in browser**
-- Try opening `http://localhost:9330` manually
-- Make sure nothing else is running on port 9330
+- Try opening `http://localhost:9331` manually
+- Make sure nothing else is running on port 9331
 
 **eBay token expired**
 - Settings → click **Connect eBay Account** again

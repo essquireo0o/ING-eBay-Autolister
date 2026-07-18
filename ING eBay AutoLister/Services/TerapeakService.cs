@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace ING_eBay_AutoLister.Services;
@@ -15,12 +16,41 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
     private readonly string _sessionPath = Path.Combine(env.ContentRootPath, "terapeak-session.json");
     private volatile bool _loginInProgress;
 
+    // Windows blocks a background process from stealing focus by default — without this, the
+    // login browser can open behind the app window/taskbar with no visible indication it
+    // appeared at all. AllowSetForegroundWindow(ASFW_ANY) grants ANY process a one-time pass to
+    // call SetForegroundWindow before the next user input event, which is exactly what the
+    // freshly-spawned Chrome window needs to do to raise itself.
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
+    private const int ASFW_ANY = -1;
+
     private static string PlaywrightDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "npm", "node_modules", "playwright");
 
     public bool IsConnected => File.Exists(_sessionPath);
     public bool IsLoginInProgress => _loginInProgress;
+    public string? LastLoginError { get; private set; }
+
+    // A GUI process (double-click, startup shortcut, tray auto-launch) inherits whatever PATH
+    // its parent (usually explorer.exe) had cached at logon — installing Node.js later doesn't
+    // reach it until a full sign-out, even though a freshly-opened terminal sees it immediately.
+    // Relying on bare "node" + PATH search silently breaks for exactly that reason, so resolve a
+    // concrete node.exe path up front instead of trusting the inherited environment.
+    private static readonly Lazy<string> ResolvedNodeExe = new(() =>
+    {
+        string[] candidates =
+        [
+            Environment.GetEnvironmentVariable("ProgramFiles") is { } pf ? Path.Combine(pf, "nodejs", "node.exe") : "",
+            Environment.GetEnvironmentVariable("ProgramFiles(x86)") is { } pf86 ? Path.Combine(pf86, "nodejs", "node.exe") : "",
+            Environment.GetEnvironmentVariable("PATH")?
+                .Split(Path.PathSeparator)
+                .Select(dir => { try { return Path.Combine(dir, "node.exe"); } catch { return ""; } })
+                .FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p)) ?? ""
+        ];
+        return candidates.FirstOrDefault(File.Exists) ?? "node"; // last resort: let Process.Start try PATH itself
+    });
 
     // ── One-time interactive login ────────────────────────────────────────────
 
@@ -29,6 +59,7 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
         if (_loginInProgress)
             return (false, "A login window is already open — finish logging in there.");
 
+        LastLoginError = null;
         _loginInProgress = true;
         _ = Task.Run(RunLoginProcessAsync);
         return (true, "A browser window just opened — log into eBay there. It closes itself once you're in.");
@@ -44,13 +75,15 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             // The real installed Chrome (not Playwright's bundled "Chrome for Testing" build)
             // reports a normal, self-consistent fingerprint — eBay's bot detection flags the
             // bundled test browser much more readily, especially after repeated automated hits.
-            "  const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--disable-blink-features=AutomationControlled'] });\n" +
+            "  const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--disable-blink-features=AutomationControlled', '--start-maximized'] });\n" +
             "  const ctx = await browser.newContext({ viewport: null });\n" +
             "  await ctx.addInitScript(() => { Object.defineProperty(navigator,'webdriver',{get:()=>undefined}); });\n" +
             "  const page = await ctx.newPage();\n" +
+            "  await page.bringToFront().catch(() => {});\n" +
             "  try {\n" +
             "    await page.goto('https://www.ebay.com/sh/research?marketplace=EBAY-US&tabName=SOLD', { waitUntil: 'domcontentloaded', timeout: 30000 });\n" +
             "  } catch (_) {}\n" +
+            "  await page.bringToFront().catch(() => {});\n" +
             "  const deadline = Date.now() + 6 * 60 * 1000;\n" +
             "  while (Date.now() < deadline) {\n" +
             "    if (!browser.isConnected()) break;\n" + // user closed the window manually
@@ -75,7 +108,7 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
         {
             var psi = new ProcessStartInfo
             {
-                FileName               = "node",
+                FileName               = ResolvedNodeExe.Value,
                 ArgumentList           = { scriptFile },
                 WorkingDirectory       = PlaywrightDir,
                 RedirectStandardOutput = true,
@@ -83,6 +116,11 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
                 UseShellExecute        = false,
                 CreateNoWindow         = true
             };
+
+            // Grant foreground rights before launch so the Chrome window this spawns can raise
+            // itself above whatever the user is currently looking at, instead of opening
+            // silently behind it. Only needed here — ScrapeAsync's browser is headless.
+            try { AllowSetForegroundWindow(ASFW_ANY); } catch { }
 
             using var proc = Process.Start(psi)!;
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
@@ -93,7 +131,8 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             catch (OperationCanceledException)
             {
                 try { proc.Kill(entireProcessTree: true); } catch { }
-                log.Add("Warning", "Terapeak login timed out", "No login completed within 7 minutes.");
+                LastLoginError = "No login completed within 7 minutes.";
+                log.Add("Warning", "Terapeak login timed out", LastLoginError);
                 return;
             }
 
@@ -103,7 +142,19 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             if (stdout == "SAVED")
                 log.Add("Info", "Terapeak connected", "Session saved — sold comps will now use real Terapeak data.");
             else
-                log.Add("Warning", "Terapeak login not completed", string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+            {
+                LastLoginError = string.IsNullOrWhiteSpace(stderr) ? (stdout.Length > 0 ? stdout : "Login window was closed before signing in.") : stderr;
+                log.Add("Warning", "Terapeak login not completed", LastLoginError);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Previously unguarded — a failure here (most commonly the app process inheriting a
+            // stale PATH that predates a Node.js install, so "node" can't be found) used to vanish
+            // silently: _loginInProgress still reset to false in the finally below, the UI kept
+            // saying "browser window open", and nothing ever told the user why no window appeared.
+            LastLoginError = $"Couldn't launch the login browser: {ex.Message}";
+            log.Add("Error", "Terapeak login failed to start", LastLoginError);
         }
         finally
         {
@@ -156,7 +207,7 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
         {
             var psi = new ProcessStartInfo
             {
-                FileName               = "node",
+                FileName               = ResolvedNodeExe.Value,
                 ArgumentList           = { scriptFile },
                 WorkingDirectory       = PlaywrightDir,
                 RedirectStandardOutput = true,
@@ -189,7 +240,11 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
 
             if (loggedOut)
             {
-                Disconnect(); // session expired — clear it so the UI prompts to reconnect
+                // No auto-reconnect here (removed 2026-07-15 along with the background scanner —
+                // see Program.cs) — popping a login window as a side effect of any scrape,
+                // including a passive on-demand lookup, is exactly the unattended behavior that
+                // was turned off. Reconnecting is the user's call, made explicitly in Settings.
+                Disconnect();
                 return new TerapeakScrapeResult { Status = "session_expired" };
             }
 

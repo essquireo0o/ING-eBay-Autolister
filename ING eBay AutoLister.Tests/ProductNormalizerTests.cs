@@ -1,0 +1,95 @@
+using ING_eBay_AutoLister.Services;
+
+namespace ING_eBay_AutoLister.Tests;
+
+public class ProductNormalizerTests
+{
+    private static ProductNormalizer CreateNormalizer() => new(new ProductIdentityExtractor());
+
+    [Fact]
+    public void Normalize_LotOfTen_ExtractsQuantity()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("Lot of 10 Bitmain Antminer PSU Fans");
+
+        Assert.Equal(10, product.Quantity);
+    }
+
+    [Fact]
+    public void Normalize_LeadingParenCount_ExtractsQuantity()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("(5) Antminer Cooling Fans 12038");
+
+        Assert.Equal(5, product.Quantity);
+    }
+
+    [Fact]
+    public void Normalize_NoQuantityIndicator_DefaultsToOne()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("Bitmain Antminer S19j Pro 104TH Bitcoin Miner");
+
+        Assert.Equal(1, product.Quantity);
+    }
+
+    [Fact]
+    public void Normalize_PartsOnlyListing_IsFlaggedAsNegativeKeyword()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("Bitmain Antminer S19 Pro FOR PARTS not working");
+
+        Assert.Contains("parts", product.NegativeKeywords);
+        Assert.Contains("broken", product.NegativeKeywords);
+    }
+
+    [Fact]
+    public void Normalize_EmptyBoxOrBoxOnly_IsFlaggedAsEmptyBoxKeyword()
+    {
+        var normalizer = CreateNormalizer();
+
+        var boxOnly = normalizer.Normalize("RTX 4090 Founders Edition - box only");
+        var emptyBox = normalizer.Normalize("RTX 4090 empty box no card included");
+
+        Assert.Contains("empty box", boxOnly.NegativeKeywords);
+        Assert.Contains("empty box", emptyBox.NegativeKeywords);
+    }
+
+    [Fact]
+    public void Normalize_CaseListingWithNoModelOrPartNumber_IsFlaggedAsAccessoryListing()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("Leather Case for phone - brown");
+
+        Assert.True(product.IsAccessoryListing);
+    }
+
+    [Fact]
+    public void Normalize_MainProductThatMentionsAnAccessoryWord_IsNotFlaggedAsAccessoryListing()
+    {
+        var normalizer = CreateNormalizer();
+
+        // Has a real model (extracted via ProductIdentityExtractor), so mentioning "case" in
+        // passing shouldn't make this look like an accessory-only listing.
+        var product = normalizer.Normalize("Bitmain Antminer S19j Pro 104TH with case and box");
+
+        Assert.False(product.IsAccessoryListing);
+    }
+
+    [Fact]
+    public void Normalize_MergedCamelCaseWords_AreSplitBeforeExtraction()
+    {
+        var normalizer = CreateNormalizer();
+
+        var product = normalizer.Normalize("Apple iPhone 15 ProMax 256GB");
+
+        // "ProMax" -> "Pro Max" before extraction; whatever's left in Model shouldn't still
+        // contain a squished "promax" token.
+        Assert.DoesNotContain("promax", (product.Model ?? "").ToLowerInvariant());
+    }
+}

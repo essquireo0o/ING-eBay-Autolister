@@ -24,10 +24,10 @@ bool isWindowsService = WindowsServiceHelpers.IsWindowsService();
 // ── Dev port override ─────────────────────────────────────────────────────────
 // Set AUTOLISTER_DEV_PORT to run a second, independent instance side-by-side
 // with the installed Windows service (e.g. while iterating on source without
-// touching the service's port 9330).
-var port    = Environment.GetEnvironmentVariable("AUTOLISTER_DEV_PORT") ?? "9330";
+// touching the service's port 9331).
+var port    = Environment.GetEnvironmentVariable("AUTOLISTER_DEV_PORT") ?? "9331";
 var baseUrl = $"http://localhost:{port}";
-var isDevPort = port != "9330";
+var isDevPort = port != "9331";
 
 // ── Elevated helper: add inglistingengine.com → 127.0.0.1 to hosts ──────────
 // The installer re-launches with this flag as admin. After adding the entry the
@@ -50,7 +50,7 @@ if (args.Contains("--add-local-dns"))
 // Service mode: SCM guarantees a single instance — skip the mutex entirely.
 // Interactive mode:
 //   1. Acquire mutex so only one tray instance runs at a time.
-//   2. If the Windows service is already serving on 9330, show a tray icon
+//   2. If the Windows service is already serving on 9331, show a tray icon
 //      without starting a second web server (opens browser immediately).
 //   3. Otherwise start the server ourselves, then show the tray icon.
 System.Threading.Mutex? _mutex = null;
@@ -155,8 +155,37 @@ builder.Services.AddSingleton<LicenseService>();
 builder.Services.AddSingleton<StripeService>();
 builder.Services.AddSingleton<AnalyticsStore>();
 builder.Services.AddSingleton<TerapeakService>();
-builder.Services.AddSingleton<GemRadarStore>();
 builder.Services.AddSingleton<TerapeakPriceCache>();
+// Local sold-history lookup — read-only against the externally-maintained Marketplace.db at
+// C:\INGListing\Data\Marketplace.db (populated by a separate collector process). Feeds the
+// Opportunity Finder's Supplier File Analyzer with real local comps before falling back to
+// Terapeak. See ExternalMarketplaceDb / MarketplaceRepository for the read-only guarantees.
+builder.Services.AddSingleton<ExternalMarketplaceDb>();
+builder.Services.AddSingleton<IMarketplaceRepository, MarketplaceRepository>();
+// Structured brand/model/part-number extraction from free-text titles — see
+// ProductIdentityExtractor. Stateless; used before every local sold-history search.
+builder.Services.AddSingleton<ProductIdentityExtractor>();
+// Sell-through / liquidity scoring — how fast an item is likely to sell, from local sold-history
+// date density only. See LiquidityScoringConfig for every tunable threshold/weight.
+builder.Services.AddSingleton<LiquidityScoringConfig>();
+builder.Services.AddSingleton<LiquidityScoringService>();
+// Real product-matching and scoring engine (see the plan this was built from): normalizes a raw
+// title into brand/model/spec/quantity/negative-keywords (ProductNormalizer), scores one
+// SoldListings candidate against that identity with the weighted point table + hard exclusions
+// (ComparableMatcher), turns matched comparables + Terapeak into a full price estimate
+// (MarketPriceEstimator, via TerapeakMarketService — lazy/rationed, never bulk-queries Terapeak),
+// computes SellThroughRate=Sold/Active (SellThroughCalculator), fee/profit math off a configurable
+// FeeProfile (ProfitCalculator), and the final Opportunity/Confidence scores (OpportunityScoringService/
+// ConfidenceScoringService).
+builder.Services.AddSingleton<ProductNormalizer>();
+builder.Services.AddSingleton<ComparableMatcher>();
+builder.Services.AddSingleton<TerapeakMarketService>();
+builder.Services.AddSingleton<MarketPriceEstimator>();
+builder.Services.AddSingleton<SellThroughCalculator>();
+builder.Services.AddSingleton<FeeProfile>();
+builder.Services.AddSingleton<ProfitCalculator>();
+builder.Services.AddSingleton<OpportunityScoringService>();
+builder.Services.AddSingleton<ConfidenceScoringService>();
 
 var app = builder.Build();
 
@@ -184,6 +213,45 @@ var app = builder.Build();
 
 // Record install date on first run
 app.Services.GetRequiredService<CredentialsStore>().EnsureInstallDate();
+
+// Marketplace database startup check — confirms the local sold-history lookup is usable, and
+// adds any of its (non-destructive) indexes that are still missing. Never fatal: Opportunity
+// Finder works fine without this, just without local comps until the file/table is available.
+// Backgrounded like the license check below: on a large Marketplace.db, GetSoldListingsCount's
+// full COUNT(*) scan and EnsureIndexes' CREATE INDEX can take a while, and neither should delay
+// the server from accepting requests — Opportunity Finder just falls back to Terapeak until this
+// finishes.
+_ = Task.Run(() =>
+{
+    var marketplaceLog = app.Services.GetRequiredService<ActionLog>();
+    try
+    {
+        var externalDb = app.Services.GetRequiredService<ExternalMarketplaceDb>();
+        if (!externalDb.DatabaseFileExists)
+        {
+            marketplaceLog.Add("Warning", "Marketplace database not found", $"No file at {externalDb.DatabasePath}.");
+        }
+        else if (!externalDb.SoldListingsTableExists())
+        {
+            marketplaceLog.Add("Warning", "Marketplace database connected", "SoldListings table not found.");
+        }
+        else
+        {
+            var count = externalDb.GetSoldListingsCount();
+            marketplaceLog.Add("Info", "Marketplace database connected", $"Marketplace database connected: {count} sold listings");
+
+            var (attempted, error, created) = externalDb.EnsureIndexes();
+            if (!attempted)
+                marketplaceLog.Add("Warning", "Marketplace index check skipped", error ?? "Unknown error.");
+            else if (created.Count > 0)
+                marketplaceLog.Add("Info", "Marketplace indexes added", string.Join(", ", created));
+        }
+    }
+    catch (Exception ex)
+    {
+        marketplaceLog.Add("Warning", "Marketplace database connection failed", ex.Message);
+    }
+});
 
 // Background license check — non-blocking, runs after startup
 _ = Task.Run(async () =>
@@ -235,64 +303,23 @@ _ = Task.Run(async () =>
     }
 });
 
-// ── Gem Radar background scanner (Pro) ─────────────────────────────────────────
-// Rotates through a fixed list of broad category keywords, one per cycle, running each through
-// the exact same FindOpportunitiesAsync pipeline as a manual Opportunity Finder search — so the
-// Pro "Gems" feed fills up passively without anyone having to type a keyword. Deliberately slow
-// (one category every 12 minutes) and capped at a small per-category real-scrape budget: see
-// TerapeakPriceCache / GetOrScrapePricingAsync for how overlapping keywords across categories
-// and manual searches reuse a single scrape instead of each paying for its own.
-string[] gemRadarCategories =
-[
-    "graphics card", "gaming laptop", "power tool", "vintage camera", "electric guitar",
-    "mechanical keyboard", "smart watch", "drone", "espresso machine", "cordless drill",
-    "video game console", "trading card lot", "vinyl record", "designer handbag", "cast iron skillet",
-    "lego set", "action figure", "record player", "telescope", "sewing machine",
-    "leather jacket", "wireless headphones", "robot vacuum", "board game",
-];
-
-_ = Task.Run(async () =>
-{
-    await Task.Delay(TimeSpan.FromMinutes(1)); // let startup settle first
-    var idx = 0;
-    while (true)
-    {
-        try
-        {
-            var terapeak = app.Services.GetRequiredService<TerapeakService>();
-            if (terapeak.IsConnected)
-            {
-                var category = gemRadarCategories[idx % gemRadarCategories.Length];
-                idx++;
-
-                var ebay  = app.Services.GetRequiredService<EbayService>();
-                var cache = app.Services.GetRequiredService<TerapeakPriceCache>();
-                var log   = app.Services.GetRequiredService<ActionLog>();
-                var store = app.Services.GetRequiredService<GemRadarStore>();
-
-                var result = await FindOpportunitiesAsync(category, null, null, null, null, "AUCTION",
-                    ebay, terapeak, cache, log, terapeakRecheckLimit: 3);
-
-                // Only keep genuine, high-confidence finds in the passive feed — verified
-                // pricing and a solid score, not every listing the category search returned.
-                var gems = result.Items.Where(x => x.IsVerified && x.OpportunityScore >= 55).ToList();
-                store.RecordScan(category, gems);
-                log.Add("Info", "Gem Radar scan", $"{category}: {gems.Count} gem(s) found ({cache.Count} cached prices total)");
-            }
-        }
-        catch { /* scanner must never crash the app; just retry next cycle */ }
-
-        await Task.Delay(TimeSpan.FromMinutes(12));
-    }
-});
+// Auto-connect-on-startup, the continuous background scanner, and the Gem Radar feature built on
+// top of it were removed at the user's request (2026-07-15/16): unattended, continuous automated
+// access to Terapeak/Seller Hub is a real eBay ToS risk (the User Agreement's "no robot, spider,
+// scraper, or other automated means" clause), and all of it existed purely to keep that running
+// 24/7 without the user asking each time. Full history is in git if this is ever wanted back.
+// Terapeak is still fully usable — connect manually from Settings or the Opportunity Finder
+// banner (a real visible browser window, since only a person can clear eBay's login captcha/
+// security challenge), and on-demand pricing lookups from Opportunity Finder / New Listing still
+// work, since those only ever run when a person actually asks for them.
 
 // ── Trial ─────────────────────────────────────────────────────────
 app.MapGet("/api/trial/status", (CredentialsStore store, LicenseService license) =>
 {
     store.EnsureInstallDate();
     var lic = license.Current;
-    // Beta license = unlimited free access
-    if (lic.Valid && lic.Tier == "free")
+    // Any valid license (beta key now grants "pro" — see LicenseService.CheckAsync) = unlimited access
+    if (lic.Valid && lic.Tier is "free" or "pro")
         return Results.Ok(new { daysRemaining = 9999, expired = false, licensed = true, tier = "beta" });
     var days    = store.TrialDaysRemaining();
     var expired = days <= 0;
@@ -694,54 +721,6 @@ static string? ExtractEbayItemId(string url)
     return m.Success ? m.Groups[1].Value : null;
 }
 
-static string ExtractPageText(string url, string html)
-{
-    // Strip scripts, styles, nav
-    var clean = System.Text.RegularExpressions.Regex.Replace(html,
-        @"<(script|style|nav|footer|header)[^>]*>[\s\S]*?</\1>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    // Strip all remaining tags
-    var text = System.Text.RegularExpressions.Regex.Replace(clean, "<[^>]+>", " ");
-    // Collapse whitespace
-    text = System.Text.RegularExpressions.Regex.Replace(text, @"\s{2,}", " ").Trim();
-    // Truncate
-    if (text.Length > 4000) text = text[..4000];
-
-    // Extract meta tags separately
-    var og = ExtractOgTags(html);
-    var jsonLd = ExtractJsonLd(html);
-
-    return $"URL: {url}\n\nMETA/OG DATA:\n{og}\n\nPRODUCT STRUCTURED DATA:\n{jsonLd}\n\nPAGE TEXT:\n{text}";
-}
-
-static string ExtractOgTags(string html)
-{
-    var sb = new System.Text.StringBuilder();
-    var tags = new[] { "og:title","og:description","og:image","og:price:amount","og:brand",
-                       "product:price:amount","twitter:title","twitter:description" };
-    foreach (var tag in tags)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(html,
-            $@"<meta[^>]+(?:property|name)=""{System.Text.RegularExpressions.Regex.Escape(tag)}""[^>]+content=""([^""]+)""",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (m.Success) sb.AppendLine($"{tag}: {m.Groups[1].Value}");
-    }
-    // Also grab <title>
-    var titleM = System.Text.RegularExpressions.Regex.Match(html, @"<title[^>]*>([^<]+)</title>",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (titleM.Success) sb.AppendLine($"title: {titleM.Groups[1].Value.Trim()}");
-    return sb.ToString();
-}
-
-static string ExtractJsonLd(string html)
-{
-    var m = System.Text.RegularExpressions.Regex.Match(html,
-        @"<script[^>]+type=""application/ld\+json""[^>]*>([\s\S]*?)</script>",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (!m.Success) return "";
-    var raw = m.Groups[1].Value.Trim();
-    return raw.Length > 1500 ? raw[..1500] : raw;
-}
-
 static string ExtractPrimaryImageUrl(string html)
 {
     // Try OG image first
@@ -755,12 +734,6 @@ static string ExtractPrimaryImageUrl(string html)
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     if (m.Success) return m.Groups[1].Value;
     return "";
-}
-
-static string ExtractLocalUrl(string pageText)
-{
-    var m = System.Text.RegularExpressions.Regex.Match(pageText, @"PRIMARY_IMAGE_LOCAL_URL: (/generated-photos/[^\s]+)");
-    return m.Success ? m.Groups[1].Value : "";
 }
 
 // Scrapes Bing's image search results page for direct ("murl") image URLs.
@@ -947,7 +920,7 @@ app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService
         var scrape = await terapeak.ScrapeAsync(q);
         if (scrape.Status == "ok")
         {
-            var parsed = ParseTerapeakBodyText(scrape.BodyText, q);
+            var parsed = TerapeakMarketService.ParseTerapeakBodyText(scrape.BodyText, q);
             if (parsed is not null)
                 return Results.Ok(new { parsed.Query, parsed.Items, parsed.Count, parsed.Average, parsed.Median, parsed.Min, parsed.Max, terapeakUrl, fallbackUrl, source = "terapeak" });
         }
@@ -974,19 +947,27 @@ app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService
 });
 
 // Opportunity Finder — live auctions ending soon for a keyword, ranked by estimated profit
-// against recent sold comps (Terapeak if connected, Marketplace Insights as fallback), and
-// filtered by a minimum seller feedback score.
-app.MapGet("/api/opportunities/search", async (string q, string? category, string? condition,
-    decimal? minPrice, decimal? maxPrice, string? listingType, EbayService ebay, TerapeakService terapeak,
-    TerapeakPriceCache cache, ActionLog log) =>
+// against recent sold comps (the local sold-history database first — free, instant, no rate
+// limit — then Terapeak for anything the database doesn't cover, then Marketplace Insights as a
+// last resort), and filtered by a minimum seller feedback score. A Seller username can be
+// supplied instead of (or alongside) a keyword to analyze one specific seller's own listings
+// rather than the open market.
+app.MapGet("/api/opportunities/search", async (string? q, string? seller, string? category, string? condition,
+    decimal? minPrice, decimal? maxPrice, string? listingType, bool? includeIlliquid, EbayService ebay,
+    TerapeakMarketService terapeakMarket, IMarketplaceRepository marketplace, ProductNormalizer normalizer,
+    ComparableMatcher matcher, MarketPriceEstimator priceEstimator, SellThroughCalculator sellThroughCalc,
+    ProfitCalculator profitCalc, FeeProfile feeProfile, OpportunityScoringService opportunityScorer,
+    ConfidenceScoringService confidenceScorer, LiquidityScoringConfig liquidityConfig, ActionLog log, CancellationToken ct) =>
 {
-    if (string.IsNullOrWhiteSpace(q))
-        return Results.BadRequest(new { error = "Query is required." });
+    if (string.IsNullOrWhiteSpace(q) && string.IsNullOrWhiteSpace(seller))
+        return Results.BadRequest(new { error = "A keyword or a seller username is required." });
 
     OpportunitySearchResult result;
     try
     {
-        result = await FindOpportunitiesAsync(q, category, condition, minPrice, maxPrice, listingType ?? "AUCTION", ebay, terapeak, cache, log);
+        result = await FindOpportunitiesAsync(q ?? "", category, condition, minPrice, maxPrice, listingType ?? "AUCTION",
+            ebay, terapeakMarket, marketplace, normalizer, matcher, priceEstimator, sellThroughCalc, profitCalc,
+            feeProfile, opportunityScorer, confidenceScorer, log, seller: seller, ct: ct);
     }
     catch (Exception ex)
     {
@@ -995,6 +976,20 @@ app.MapGet("/api/opportunities/search", async (string q, string? category, strin
     }
 
     var opportunities = result.Items;
+
+    // Minimum liquidity gate — Stale/Illiquid items are excluded by default (configurable via
+    // LiquidityScoringConfig.RejectStaleIlliquidByDefault), overridable per-request with
+    // includeIlliquid=true. Items with no liquidity data at all (not priced from the local
+    // database) are never gated here — "unknown" isn't the same as "known to be illiquid".
+    var excludedIlliquidCount = 0;
+    if (liquidityConfig.RejectStaleIlliquidByDefault && includeIlliquid != true)
+    {
+        var beforeGate = opportunities.Count;
+        opportunities = opportunities.Where(x => x.LiquidityLevel != "Stale/Illiquid").ToList();
+        excludedIlliquidCount = beforeGate - opportunities.Count;
+        if (excludedIlliquidCount > 0)
+            log.Add("Info", "Minimum liquidity gate applied", $"Excluded {excludedIlliquidCount} Stale/Illiquid result(s). Pass includeIlliquid=true to override.");
+    }
     var lowestPrice = opportunities.Count > 0 ? opportunities.Min(x => x.TotalCost) : (decimal?)null;
     var pricedItems  = opportunities.Where(x => x.ProfitPercent.HasValue).ToList();
     var avgProfitPercent = pricedItems.Count > 0 ? Math.Round(pricedItems.Average(x => x.ProfitPercent!.Value), 1) : (decimal?)null;
@@ -1006,48 +1001,215 @@ app.MapGet("/api/opportunities/search", async (string q, string? category, strin
         query = result.Query, marketValue = result.MarketValue, averagePrice = result.AveragePrice,
         soldSource = result.SoldSource, listingType = result.ListingType,
         count = opportunities.Count, lowestPrice, sellThroughPercent = result.SellThroughPercent, avgProfitPercent, bestOpportunity,
+        excludedIlliquidCount,
         items = opportunities
     });
 });
 
-// ── Gem Radar (Pro) ──────────────────────────────────────────────────────────
-// A passive, no-keyword-required feed: the background scanner below rotates through
-// GemRadarCategories on its own and runs each through the exact same pipeline as a manual
-// Opportunity Finder search, so Pro users open the app to a ranked list of flips instead of
-// having to already know what to search for.
-app.MapGet("/api/gems/feed", (LicenseService license, GemRadarStore store, TerapeakPriceCache cache) =>
+// Supplier File Analyzer — the user pastes/drops a supplier price list (or a single product
+// photo) into the Opportunity Finder page. Claude vision extracts every product + wholesale
+// cost. Each one goes through the same AnalyzeProductAsync pipeline the Opportunity Finder search
+// uses: local market research first (real historical sold listings, no live eBay traffic, no rate
+// limits), only falling through to Terapeak (rationed, cache-first) when the local database
+// doesn't find anything reliable — one shared implementation, not a second copy of this logic.
+app.MapPost("/api/opportunities/analyze-supplier-file", async (AnalyzeSupplierFileRequest req, ClaudeService claude,
+    EbayService ebay, IMarketplaceRepository marketplace, ProductNormalizer normalizer, ComparableMatcher matcher,
+    MarketPriceEstimator priceEstimator, SellThroughCalculator sellThroughCalc, ProfitCalculator profitCalc,
+    FeeProfile feeProfile, OpportunityScoringService opportunityScorer, ConfidenceScoringService confidenceScorer,
+    ActionLog log, CancellationToken ct) =>
 {
-    var lic = license.Current;
-    if (!(lic.Valid && lic.Tier == "pro"))
-        return Results.Json(new { error = "Gem Radar is a Pro feature." }, statusCode: 402);
+    if (string.IsNullOrWhiteSpace(req.ImageBase64))
+        return Results.BadRequest(new { error = "Image is required." });
 
-    var snap = store.GetSnapshot();
-    var gems = snap.Gems.OrderByDescending(g => g.Item.OpportunityScore ?? 0).ToList();
-    return Results.Ok(new
+    List<SupplierProduct> products;
+    try
     {
-        lastScanUtc      = snap.LastScanUtc,
-        lastScanCategory = snap.LastScanCategory,
-        totalScans       = snap.TotalScans,
-        cachedQueries    = cache.Count,
-        count            = gems.Count,
-        gems
+        products = await claude.AnalyzeSupplierFileAsync(req.ImageBase64, req.MimeType);
+    }
+    catch (Exception ex)
+    {
+        log.Add("Warning", "Supplier file analysis failed", ex.Message);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+
+    const int MaxProducts = 12;
+    const int TerapeakRecheckLimit = 6;
+
+    var items = new List<DropshipAnalysisItem>();
+    var realScrapesUsed = 0;
+
+    foreach (var p in products.Take(MaxProducts))
+    {
+        var query = string.IsNullOrWhiteSpace(p.SearchQuery) ? p.ProductName : p.SearchQuery;
+        var item = new DropshipAnalysisItem
+        {
+            ProductName      = p.ProductName,
+            SearchQuery      = query,
+            WholesaleCostUsd = p.WholesaleCostUsd,
+            Notes            = p.Notes,
+            TerapeakUrl      = "https://www.ebay.com/sh/research?marketplace=EBAY-US&tabName=SOLD&dayRange=60&keywords=" + Uri.EscapeDataString(query)
+        };
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            items.Add(item);
+            continue;
+        }
+
+        var target = normalizer.Normalize(query);
+        // Claude's vision-read fields fill in wherever the regex extractor (which ran inside
+        // AnalyzeProductAsync's normalizer, on the same query text) didn't find anything.
+        if (string.IsNullOrWhiteSpace(target.PartNumber) && !string.IsNullOrWhiteSpace(p.PartNumber)) target.PartNumber = p.PartNumber;
+        if (string.IsNullOrWhiteSpace(target.Model) && !string.IsNullOrWhiteSpace(p.Model)) target.Model = p.Model;
+        if (string.IsNullOrWhiteSpace(target.Brand) && !string.IsNullOrWhiteSpace(p.Brand)) target.Brand = p.Brand;
+
+        var isCached = await priceEstimator.EstimateAsync(target, [], query, "FIXED_PRICE", allowRealTerapeakScrape: false, ct: ct)
+            is { TerapeakComparableCount: > 0 };
+        // (EstimateAsync's own Terapeak call is cache-only here; if it happened to warm the
+        // cache it's a free hit, not a spent scrape — see TerapeakMarketService.GetAsync.)
+        var allowScrape = isCached || realScrapesUsed < TerapeakRecheckLimit;
+        if (allowScrape && !isCached) realScrapesUsed++;
+
+        MarketAnalysisResult analysis;
+        try
+        {
+            analysis = await AnalyzeProductAsync(
+                query, p.WholesaleCostUsd > 0 ? p.WholesaleCostUsd : null, quantity: 1, "FIXED_PRICE",
+                activeListingsAlreadyFetched: null, ebayForCompetitionFallback: ebay, allowRealTerapeakScrape: allowScrape,
+                normalizer, marketplace, matcher, priceEstimator, sellThroughCalc, profitCalc, feeProfile,
+                opportunityScorer, confidenceScorer, log, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            log.Add("Warning", "Dropship pricing lookup failed", $"{query}: {ex.Message}");
+            items.Add(item);
+            continue;
+        }
+
+        ApplyAnalysisToDropshipItem(item, analysis);
+        items.Add(item);
+    }
+
+    items = items.OrderByDescending(i => i.EstimatedProfitPercent ?? -999m).ToList();
+
+    return Results.Ok(new DropshipAnalysisResult
+    {
+        Items            = items,
+        ProductsExtracted = products.Count,
+        ProductsPriced    = items.Count(i => i.IsVerified)
     });
 });
 
-// Manual trigger, ungated — lets me (the assistant) verify the scan pipeline directly without
-// waiting out the real ~12-minute rotation delay or needing a live Pro license during
-// development. Same pattern as /api/terapeak/debug-scrape above. Real users only ever hit the
-// Pro-gated /api/gems/feed.
-app.MapPost("/api/gems/debug-scan-now", async (string category, EbayService ebay, TerapeakService terapeak,
-    TerapeakPriceCache cache, ActionLog log, GemRadarStore store) =>
-{
-    if (!terapeak.IsConnected)
-        return Results.BadRequest(new { error = "Terapeak not connected." });
+// ── Opportunity Finder insight cards ────────────────────────────────────────
+// These read from data the app has already mined (Terapeak cache, the user's own live listings)
+// rather than spending a fresh scrape just because someone opened the page — see each endpoint
+// for exactly what it draws on and why.
 
-    var result = await FindOpportunitiesAsync(category, null, null, null, null, "AUCTION", ebay, terapeak, cache, log, terapeakRecheckLimit: 3);
-    var gems = result.Items.Where(x => x.IsVerified && x.OpportunityScore >= 55).ToList();
-    store.RecordScan(category, gems);
-    return Results.Ok(new { category, found = gems.Count, cachedQueries = cache.Count, gems });
+app.MapGet("/api/insights/high-sell-through", (TerapeakPriceCache cache) =>
+{
+    var top = cache.GetTopSellThrough(5, TimeSpan.FromDays(14));
+    return Results.Ok(new
+    {
+        items = top.Select(t => new { category = t.Query, sellThroughPercent = t.SellThroughPercent, scrapedAtUtc = t.ScrapedAtUtc })
+    });
+});
+
+// "Low competition" needs a real demand signal alongside low supply — a category nobody's
+// searching for isn't an opportunity, it's just quiet. Only considers categories the app has
+// already mined real Terapeak sell-through data for, then checks current active-listing counts
+// via a cheap Browse API call (not Terapeak — free against the scrape budget).
+app.MapGet("/api/insights/low-competition", async (EbayService ebay, TerapeakPriceCache cache) =>
+{
+    var candidates = cache.GetTopSellThrough(15, TimeSpan.FromDays(14));
+    // Each of these is an independent Browse API round trip against a different category, so
+    // they're fetched concurrently instead of one at a time — this endpoint is on a user-facing
+    // request path (Opportunity Finder insight card) and serial awaits made it take up to 15x
+    // as long as a single call.
+    var counts = await Task.WhenAll(candidates.Select(async c => (c.Query, c.SellThroughPercent, Count: await ebay.GetActiveListingCountAsync(c.Query))));
+    var scored = counts.Where(x => x.Count > 0)
+        .Select(x => (Category: x.Query, x.SellThroughPercent, ActiveListings: x.Count))
+        .ToList();
+
+    var ranked = scored
+        .OrderByDescending(s => s.SellThroughPercent / Math.Max(1, s.ActiveListings))
+        .Take(5)
+        .Select(s => new { category = s.Category, sellThroughPercent = s.SellThroughPercent, activeListings = s.ActiveListings });
+
+    return Results.Ok(new { items = ranked });
+});
+
+// Cross-references the user's OWN active listings against cached Terapeak pricing — cache-only,
+// deliberately never triggers a live scrape just from opening this page. A listing whose keyword
+// hasn't been priced yet simply doesn't show a recommendation rather than guessing.
+app.MapGet("/api/insights/pricing-recommendations", async (EbayService ebay, TerapeakPriceCache cache, ActionLog log) =>
+{
+    List<EbayListingSummary> listings;
+    try { listings = await ebay.GetListingsAsync(); }
+    catch (Exception ex)
+    {
+        log.Add("Warning", "Pricing recommendations: listing fetch failed", ex.Message);
+        return Results.Ok(new { items = Array.Empty<object>(), checkedListings = 0 });
+    }
+
+    var recs = new List<(string Title, string Url, decimal CurrentPrice, decimal SuggestedPrice, decimal DeltaPercent)>();
+    foreach (var listing in listings.Take(30))
+    {
+        if (listing.Price <= 0) continue;
+        var keywords = ExtractKeywords(listing.Title, maxWords: 5);
+        if (string.IsNullOrWhiteSpace(keywords)) continue;
+
+        var cached = cache.TryGet(keywords, TimeSpan.FromHours(48));
+        if (cached is null) continue;
+
+        var soldPrice = cached.Median > 0 ? cached.Median : cached.Average;
+        var netResale = soldPrice - cached.AvgShipping;
+        if (netResale <= 0) continue;
+
+        var deltaPct = Math.Round((netResale - listing.Price) / listing.Price * 100m, 1);
+        if (Math.Abs(deltaPct) < 10) continue; // not worth flagging a small gap
+
+        recs.Add((listing.Title, listing.ListingUrl, listing.Price, Math.Round(netResale, 2), deltaPct));
+    }
+
+    return Results.Ok(new
+    {
+        items = recs.OrderByDescending(r => Math.Abs(r.DeltaPercent)).Take(5)
+            .Select(r => new { title = r.Title, listingUrl = r.Url, currentPrice = r.CurrentPrice, suggestedPrice = r.SuggestedPrice, deltaPercent = r.DeltaPercent }),
+        checkedListings = listings.Count
+    });
+});
+
+// General retail-seasonality knowledge, not live trend data — there's no time-series history
+// yet to detect a real trend from.
+// Clearly labeled as a heuristic calendar on both ends so it's never confused with the rest of
+// this page's live-scraped numbers.
+app.MapGet("/api/insights/seasonal-demand", () =>
+{
+    (int Month, string[] Categories)[] calendar =
+    [
+        (1,  ["fitness equipment", "planners & organizers", "snow gear clearance"]),
+        (2,  ["Valentine's gifts", "jewelry", "small kitchen appliances"]),
+        (3,  ["spring cleaning supplies", "gardening tools", "patio furniture"]),
+        (4,  ["gardening supplies", "Easter items", "bicycles"]),
+        (5,  ["graduation gifts", "outdoor furniture", "Mother's Day jewelry"]),
+        (6,  ["swimwear & pool gear", "camping equipment", "Father's Day tools"]),
+        (7,  ["patio & pool accessories", "camping gear", "back-to-school (early)"]),
+        (8,  ["back-to-school supplies", "dorm electronics", "backpacks"]),
+        (9,  ["fall decor", "hunting gear", "costumes (early)"]),
+        (10, ["Halloween costumes & decor", "fall/winter clothing", "space heaters"]),
+        (11, ["holiday decor", "electronics", "toys"]),
+        (12, ["holiday gifts", "toys", "winter apparel"]),
+    ];
+    var month = DateTime.UtcNow.Month;
+    var current = calendar.First(c => c.Month == month);
+    var next = calendar.First(c => c.Month == (month % 12) + 1);
+    return Results.Ok(new
+    {
+        basis = "General retail seasonality patterns, not live trend data.",
+        current = new { monthName = new DateTime(2000, month, 1).ToString("MMMM"), categories = current.Categories },
+        upcoming = new { monthName = new DateTime(2000, next.Month, 1).ToString("MMMM"), categories = next.Categories }
+    });
 });
 
 app.MapPost("/api/terapeak/connect", (TerapeakService terapeak) =>
@@ -1057,7 +1219,7 @@ app.MapPost("/api/terapeak/connect", (TerapeakService terapeak) =>
 });
 
 app.MapGet("/api/terapeak/status", (TerapeakService terapeak) =>
-    Results.Ok(new { connected = terapeak.IsConnected, loginInProgress = terapeak.IsLoginInProgress }));
+    Results.Ok(new { connected = terapeak.IsConnected, loginInProgress = terapeak.IsLoginInProgress, lastError = terapeak.LastLoginError }));
 
 app.MapPost("/api/terapeak/disconnect", (TerapeakService terapeak) =>
 {
@@ -1073,112 +1235,119 @@ app.MapGet("/api/terapeak/debug-scrape", async (string q, TerapeakService terape
     return Results.Ok(scrape);
 });
 
-static SoldCompsResult? ParseTerapeakBodyText(string text, string query)
-{
-    // Text parse of the Seller Hub Research page, tuned against a real logged-in capture
-    // (see /api/terapeak/debug-scrape). innerText renders each stat tile as "<value>\n<label>",
-    // e.g. "$64.31\nAvg sold price", and each result-table row as "...\n$14.90\nFixed price\n...".
-    var result = new SoldCompsResult { Query = query };
-
-    var avgMatch = System.Text.RegularExpressions.Regex.Match(text,
-        @"\$\s*([\d,]+\.\d{2})\s*\n\s*Avg sold price", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (avgMatch.Success && decimal.TryParse(avgMatch.Groups[1].Value.Replace(",", ""), out var avg))
-        result.Average = avg;
-
-    var rangeMatch = System.Text.RegularExpressions.Regex.Match(text,
-        @"\$\s*([\d,]+\.\d{2})\s*-\s*\$\s*([\d,]+\.\d{2})\s*\n\s*Sold price range", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (rangeMatch.Success)
-    {
-        if (decimal.TryParse(rangeMatch.Groups[1].Value.Replace(",", ""), out var min)) result.Min = min;
-        if (decimal.TryParse(rangeMatch.Groups[2].Value.Replace(",", ""), out var max)) result.Max = max;
-    }
-
-    // "72%\nSell-through" — Terapeak shows "-" instead of a percentage when it can't compute
-    // one for this query, which TryParse below just leaves as null (no data) rather than 0%.
-    var sellThroughMatch = System.Text.RegularExpressions.Regex.Match(text,
-        @"([\d.]+)%\s*\n\s*Sell-through", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (sellThroughMatch.Success && decimal.TryParse(sellThroughMatch.Groups[1].Value, out var sellThrough))
-        result.SellThroughPercent = sellThrough;
-
-    var shippingMatch = System.Text.RegularExpressions.Regex.Match(text,
-        @"\$\s*([\d,]+\.\d{2})\s*\n\s*Avg shipping", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    if (shippingMatch.Success && decimal.TryParse(shippingMatch.Groups[1].Value.Replace(",", ""), out var avgShip))
-        result.AvgShipping = avgShip;
-
-    // Each matching product row shows its own avg sold price — collect them into a real
-    // per-listing distribution so we get an actual median (the page-level summary above
-    // only gives a single blended average, which the opportunity-profit calc doesn't want).
-    var rowPrices = System.Text.RegularExpressions.Regex.Matches(text,
-            @"\$\s*([\d,]+\.\d{2})\s*\n\s*(?:Fixed price|Auction|Best Offer)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-        .Select(m => decimal.TryParse(m.Groups[1].Value.Replace(",", ""), out var p) ? p : (decimal?)null)
-        .Where(p => p.HasValue)
-        .Select(p => p!.Value)
-        .OrderBy(p => p)
-        .ToList();
-
-    if (rowPrices.Count > 0)
-    {
-        result.Count  = rowPrices.Count;
-        result.Median = rowPrices.Count % 2 == 1
-            ? rowPrices[rowPrices.Count / 2]
-            : (rowPrices[rowPrices.Count / 2 - 1] + rowPrices[rowPrices.Count / 2]) / 2m;
-    }
-
-    return result.Count > 0 || result.Average > 0 ? result : null;
-}
-
-// The whole opportunity-search-and-score pipeline, shared by the interactive
-// /api/opportunities/search endpoint and the Gem Radar background scanner so a keyword search
-// and a passive category scan run identically instead of drifting apart over time.
+// The whole opportunity-search-and-score pipeline behind the interactive /api/opportunities/search
+// endpoint. When a seller is given with no keyword, this skips the broad market-value estimate
+// (there's no single keyword to price against a whole seller's inventory) and lets the per-item
+// recheck below price each listing off its own title instead.
 static async Task<OpportunitySearchResult> FindOpportunitiesAsync(
     string q, string? category, string? condition, decimal? minPrice, decimal? maxPrice, string listingType,
-    EbayService ebay, TerapeakService terapeak, TerapeakPriceCache cache, ActionLog log, int terapeakRecheckLimit = 5)
+    EbayService ebay, TerapeakMarketService terapeakMarket, IMarketplaceRepository marketplace,
+    ProductNormalizer normalizer, ComparableMatcher matcher, MarketPriceEstimator priceEstimator,
+    SellThroughCalculator sellThroughCalc, ProfitCalculator profitCalc, FeeProfile feeProfile,
+    OpportunityScoringService opportunityScorer, ConfidenceScoringService confidenceScorer, ActionLog log,
+    int terapeakRecheckLimit = 5, string? seller = null, CancellationToken ct = default)
 {
     // Price the same combined keyword+category search that's actually being run below.
     var priceQuery = string.IsNullOrWhiteSpace(category) ? q : $"{q} {category}";
 
-    // Estimate current broad market value from sold comps, same sources /api/sold-comps uses.
-    // This is a rough, blended estimate across everything matching the search term — good
-    // enough to rank 50 results, not precise enough to trust for any one specific item (see
-    // the per-item Terapeak re-check below, which replaces it for the top few candidates).
-    // Goes through the shared cache first (see GetOrScrapePricingAsync) so a query any other
-    // search already paid for — manual or Gem Radar — doesn't cost a second real scrape.
+    // Estimate current broad market value from sold comps. Checked in cost order: the local
+    // sold-history database first (free, instant, no rate limit against eBay), then Terapeak,
+    // then Marketplace Insights as a last resort. This is a rough, blended estimate across
+    // everything matching the search term — good enough to rank 50 results, not precise enough
+    // to trust for any one specific item (see the per-item recheck below, which replaces it for
+    // every candidate it can find better data for). Terapeak goes through the shared cache first
+    // (see TerapeakMarketService) so a query any other search already paid for doesn't cost a
+    // second real scrape.
     decimal marketValue = 0;
     decimal averagePrice = 0;
     decimal avgShipping = 0;
     decimal? sellThroughPercent = null;
     var soldSource = "none";
-    var broadPricing = await GetOrScrapePricingAsync(priceQuery, terapeak, cache, log);
-    if (broadPricing is not null)
+
+    if (!string.IsNullOrWhiteSpace(q))
     {
-        marketValue = broadPricing.Median > 0 ? broadPricing.Median : broadPricing.Average;
-        averagePrice = broadPricing.Average;
-        avgShipping = broadPricing.AvgShipping;
-        sellThroughPercent = broadPricing.SellThroughPercent;
-        soldSource = "terapeak";
-    }
-    if (marketValue == 0)
-    {
+        // Normalize before hitting the local database, so the search tries the strongest
+        // identifier actually present in the query instead of always falling straight to a
+        // broad keyword match.
+        var broadTarget = normalizer.Normalize(priceQuery);
+        if (!string.IsNullOrWhiteSpace(condition)) broadTarget.Condition = condition;
+
+        MarketplacePricingSummary? localBroad = null;
         try
         {
-            var soldResult = await ebay.SearchSoldCompsAsync(priceQuery);
-            if (soldResult.Count > 0)
+            localBroad = await marketplace.FindComparablesAsync(new MarketplaceLookupRequest
             {
-                marketValue = soldResult.Median > 0 ? soldResult.Median : soldResult.Average;
-                averagePrice = soldResult.Average;
-                soldSource = "marketplace_insights";
-            }
+                PartNumber     = broadTarget.PartNumber,
+                Model          = broadTarget.Model,
+                Brand          = broadTarget.Brand,
+                Category       = broadTarget.Category,
+                Keywords       = priceQuery,
+                Condition      = condition,
+                MaxComparables = 20
+            }, ct);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            log.Add("Warning", "Opportunity sold-comp lookup failed", ex.Message);
+            log.Add("Warning", "Opportunity local market lookup failed", ex.Message);
+        }
+
+        // Require a few matches before trusting the local database over a live scrape — one or
+        // two comps aren't enough to call it a reliable market estimate.
+        if (localBroad is { MatchCount: >= 3 })
+        {
+            marketValue   = localBroad.MedianPrice ?? localBroad.AveragePrice ?? 0;
+            averagePrice  = localBroad.AveragePrice ?? 0;
+            avgShipping   = localBroad.AverageShipping ?? 0;
+            soldSource    = "local_market_data";
+            // No live active-listing count is fetched on this path, so a true sold/(sold+active)
+            // sell-through ratio (what Terapeak reports) isn't computable here. LiquidityScore is
+            // already a comparable 0-100 measure of how fast this sells (see
+            // LiquidityScoringService), so it doubles as the closest honest proxy rather than
+            // leaving the sell-through stat silently blank for the now-preferred data source.
+            sellThroughPercent = localBroad.LiquidityScore;
+        }
+        else
+        {
+            var broadPricing = await terapeakMarket.GetAsync(broadTarget, priceQuery, allowRealScrape: true, ct: ct);
+            if (broadPricing is not null)
+            {
+                marketValue = broadPricing.Data.Median > 0 ? broadPricing.Data.Median : broadPricing.Data.Average;
+                averagePrice = broadPricing.Data.Average;
+                avgShipping = broadPricing.Data.AvgShipping;
+                sellThroughPercent = broadPricing.Data.SellThroughPercent;
+                soldSource = "terapeak";
+            }
+            if (marketValue == 0)
+            {
+                try
+                {
+                    var soldResult = await ebay.SearchSoldCompsAsync(priceQuery);
+                    if (soldResult.Count > 0)
+                    {
+                        marketValue = soldResult.Median > 0 ? soldResult.Median : soldResult.Average;
+                        averagePrice = soldResult.Average;
+                        soldSource = "marketplace_insights";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log.Add("Warning", "Opportunity sold-comp lookup failed", ex.Message);
+                }
+            }
         }
     }
-    // Compare against buyer's real total cost (sold price + shipping), not just sold price —
-    // Terapeak reports these as separate stats.
-    var totalMarketValue = marketValue > 0 ? marketValue + avgShipping : 0;
+    // Net resale value = what the item actually sells for, minus what it costs YOU to ship it to
+    // your buyer. avgShipping is a real cash cost of reselling, not extra revenue — a listing
+    // that's "underpriced" before shipping can easily be a loser once a heavy/bulky item's
+    // shipping cost is subtracted, and hiding that was inflating every profit estimate. Allowed
+    // to go negative (shipping costing more than the item is worth) rather than being clamped to
+    // "no data" — that's a real, useful signal, not an absence of one.
+    var netResaleValue = marketValue > 0 ? marketValue - avgShipping : 0;
 
-    var listings = await ebay.SearchEndingSoonAsync(q, 0, 50, category, condition, minPrice, maxPrice, listingType);
+    var listings = string.IsNullOrWhiteSpace(seller)
+        ? await ebay.SearchEndingSoonAsync(q, 0, 50, category, condition, minPrice, maxPrice, listingType)
+        : await ebay.SearchBySellerAsync(seller, 50, condition, minPrice, maxPrice, listingType);
 
     // "Newly listed" has no real listing-start timestamp available from the Browse API's
     // item_summary — rank within the API's own newlyListed-sorted order is the only proxy,
@@ -1189,8 +1358,8 @@ static async Task<OpportunitySearchResult> FindOpportunitiesAsync(
         .Select((item, idx) =>
         {
             var totalCost = item.Price + item.ShippingCost;
-            decimal? pct = totalMarketValue > 0 && totalCost > 0
-                ? Math.Round((totalMarketValue - totalCost) / totalCost * 100m, 1)
+            decimal? pct = marketValue > 0 && totalCost > 0
+                ? Math.Round((netResaleValue - totalCost) / totalCost * 100m, 1)
                 : (decimal?)null;
             return new OpportunityListItem
             {
@@ -1207,9 +1376,10 @@ static async Task<OpportunitySearchResult> FindOpportunitiesAsync(
                 BidCount             = item.BidCount,
                 // Broad, search-wide estimate — same for every item until the per-item Terapeak
                 // re-check below replaces it for the top few candidates with a real per-item price.
-                MarketAverage        = averagePrice > 0 ? averagePrice : (decimal?)null,
-                EstimatedResalePrice = totalMarketValue > 0 ? totalMarketValue : (decimal?)null,
-                EstimatedProfit      = totalMarketValue > 0 && totalCost > 0 ? Math.Round(totalMarketValue - totalCost, 2) : (decimal?)null,
+                MarketAverage           = averagePrice > 0 ? averagePrice : (decimal?)null,
+                EstimatedResaleShipping = marketValue > 0 ? avgShipping : (decimal?)null,
+                EstimatedResalePrice    = marketValue > 0 ? netResaleValue : (decimal?)null,
+                EstimatedProfit         = marketValue > 0 && totalCost > 0 ? Math.Round(netResaleValue - totalCost, 2) : (decimal?)null,
                 ProfitPercent        = pct,
                 // Cheap heuristics, not AI/vision analysis — catch obvious cases only.
                 IsUnderpriced      = pct is > 15,
@@ -1224,119 +1394,322 @@ static async Task<OpportunitySearchResult> FindOpportunitiesAsync(
         })
         .ToList();
 
-    // Re-check candidates against comps for THAT specific item (keywords pulled from its own
-    // title), not the broad search-wide estimate — a single search term like "postcard" or
-    // "graphics card" can span a $0.01–$8,000 range, so the blended market value above is too
-    // noisy to trust for any one listing. Real Terapeak scrapes are the scarce resource here,
-    // so they're rationed to terapeakRecheckLimit per search — but a cache hit is free and
-    // doesn't touch that budget, so EVERY priced listing gets checked against the cache first,
-    // not just the top few. The longer this app runs (manual searches + the Gem Radar scanner
-    // both feed the same cache), the more listings get verified pricing for zero extra scrapes.
+    // Re-check candidates against comps for THAT specific item (its own title, not the broad
+    // search-wide estimate) — a single search term like "postcard" or "graphics card" can span a
+    // $0.01-$8,000 range, so the blended market value above is too noisy to trust for any one
+    // listing. AnalyzeProductAsync runs the full matching/pricing/scoring engine per candidate:
+    // local sold-history database first (free, no budget spent), real Terapeak scrapes only for
+    // whatever the database doesn't cover and only up to terapeakRecheckLimit per search (a cache
+    // hit is free and doesn't touch that budget).
     if (terapeakRecheckLimit > 0)
     {
         var realScrapesUsed = 0;
-        var candidates = opportunities
-            .Where(x => x.ProfitPercent.HasValue)
-            .OrderByDescending(x => x.ProfitPercent!.Value);
+        // With no broad keyword (seller-only search) nothing has a ProfitPercent yet to rank
+        // candidates by — recheck every listing in whatever order the API returned instead of
+        // filtering down to an empty set.
+        var candidates = marketValue > 0
+            ? opportunities.Where(x => x.ProfitPercent.HasValue).OrderByDescending(x => x.ProfitPercent!.Value)
+            : opportunities.AsEnumerable();
 
         foreach (var candidate in candidates)
         {
-            var keywords = ExtractKeywords(candidate.Title);
-            if (string.IsNullOrWhiteSpace(keywords)) continue;
+            if (string.IsNullOrWhiteSpace(candidate.Title)) continue;
 
-            var isCached = cache.TryGet(keywords, TimeSpan.FromHours(48)) is not null;
-            if (!isCached)
-            {
-                if (realScrapesUsed >= terapeakRecheckLimit) continue;
-                realScrapesUsed++;
-            }
+            // Cache-only pre-check (allowRealTerapeakScrape: false — never scrapes) so a cache
+            // hit doesn't consume the real-scrape budget; AnalyzeProductAsync below re-checks the
+            // same cache key, so this costs an extra SQLite read, never an extra scrape.
+            var isCached = await terapeakMarket.GetAsync(normalizer.Normalize(candidate.Title), candidate.Title,
+                allowRealScrape: false, ct: ct) is not null;
+            var allowScrape = isCached || realScrapesUsed < terapeakRecheckLimit;
+            if (allowScrape && !isCached) realScrapesUsed++;
 
-            var itemParsed = await GetOrScrapePricingAsync(keywords, terapeak, cache, log);
-            if (itemParsed is null) continue;
+            // "Supplier cost" in this flow is the cost to acquire the live listing itself (price +
+            // shipping) — what a reseller flipping this item would have paid.
+            var analysis = await AnalyzeProductAsync(
+                candidate.Title, supplierUnitCost: candidate.TotalCost > 0 ? candidate.TotalCost : null, quantity: 1, listingType,
+                activeListingsAlreadyFetched: listings, ebayForCompetitionFallback: null,
+                allowRealTerapeakScrape: allowScrape,
+                normalizer, marketplace, matcher, priceEstimator, sellThroughCalc, profitCalc, feeProfile,
+                opportunityScorer, confidenceScorer, log, ct);
 
-            var itemMarketValue = (itemParsed.Median > 0 ? itemParsed.Median : itemParsed.Average) + itemParsed.AvgShipping;
-            if (itemMarketValue <= 0 || candidate.TotalCost <= 0) continue;
-
-            candidate.MarketAverage        = itemParsed.Average > 0 ? itemParsed.Average : candidate.MarketAverage;
-            candidate.EstimatedResalePrice = itemMarketValue;
-            candidate.EstimatedProfit      = Math.Round(itemMarketValue - candidate.TotalCost, 2);
-            candidate.ProfitPercent        = Math.Round((itemMarketValue - candidate.TotalCost) / candidate.TotalCost * 100m, 1);
-            candidate.IsVerified           = true;
-            candidate.IsUnderpriced        = candidate.ProfitPercent is > 15;
-            candidate.IsHighProfitMargin   = candidate.ProfitPercent is > 50;
+            ApplyAnalysisToOpportunityItem(candidate, analysis);
         }
     }
-
-    foreach (var item in opportunities)
-        item.OpportunityScore = ComputeOpportunityScore(item);
 
     opportunities = opportunities.OrderByDescending(x => x.ProfitPercent ?? -999m).ToList();
 
     return new OpportunitySearchResult
     {
-        Query = q, MarketValue = marketValue, AveragePrice = averagePrice, SoldSource = soldSource,
+        Query = string.IsNullOrWhiteSpace(q) ? $"seller:{seller}" : q,
+        MarketValue = marketValue, AveragePrice = averagePrice, SoldSource = soldSource,
         ListingType = listingType, SellThroughPercent = sellThroughPercent, Items = opportunities
     };
 }
 
-// Single entry point for "get me sold-comp pricing for this query" — checks the persistent
-// cache first (free, no eBay traffic) and only falls through to a real Terapeak scrape on a
-// miss, caching whatever it finds for the next caller. This is what lets the interactive search
-// and the Gem Radar background scanner share one scrape budget instead of each burning its own.
-static async Task<SoldCompsResult?> GetOrScrapePricingAsync(
-    string query, TerapeakService terapeak, TerapeakPriceCache cache, ActionLog log, TimeSpan? maxAge = null)
+// The single shared entry point for "analyze this one product" — used by both the Opportunity
+// Finder's per-item recheck and the Supplier File Analyzer, so there's exactly one implementation
+// of product normalization -> local-DB matching -> price estimation -> sell-through -> profit ->
+// scoring, not two. See the "Opportunity Finder — Real Product-Matching & Scoring Engine" plan
+// this was built from for the full component breakdown.
+//
+// activeListingsAlreadyFetched: when the caller already has a batch of live listings for the same
+// search (the Opportunity Finder keyword/seller search), the OTHER items in that batch are used as
+// the competition set — no extra eBay call. ebayForCompetitionFallback is used only when that list
+// isn't available (Supplier File Analyzer has no batch of live listings to draw from).
+//
+// allowRealTerapeakScrape: the caller's own rationing decision (see terapeakRecheckLimit) — this
+// function never decides on its own to spend a real scrape; see TerapeakMarketService.
+static async Task<MarketAnalysisResult> AnalyzeProductAsync(
+    string titleText, decimal? supplierUnitCost, int quantity, string? listingType,
+    List<EbayOpportunityItem>? activeListingsAlreadyFetched, EbayService? ebayForCompetitionFallback,
+    bool allowRealTerapeakScrape,
+    ProductNormalizer normalizer, IMarketplaceRepository marketplace, ComparableMatcher matcher,
+    MarketPriceEstimator priceEstimator, SellThroughCalculator sellThroughCalc, ProfitCalculator profitCalc,
+    FeeProfile feeProfile, OpportunityScoringService opportunityScorer, ConfidenceScoringService confidenceScorer,
+    ActionLog log, CancellationToken ct)
 {
-    var age = maxAge ?? TimeSpan.FromHours(48);
-    var cached = cache.TryGet(query, age);
-    if (cached is not null)
-        return new SoldCompsResult
-        {
-            Query = query, Average = cached.Average, Median = cached.Median,
-            AvgShipping = cached.AvgShipping, SellThroughPercent = cached.SellThroughPercent
-        };
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var target = normalizer.Normalize(titleText);
+    if (quantity > 0) target.Quantity = quantity;
 
-    if (!terapeak.IsConnected) return null;
-
+    MarketplacePricingSummary localSummary;
     try
     {
-        var scrape = await terapeak.ScrapeAsync(query);
-        if (scrape.Status != "ok") return null;
-
-        var parsed = ParseTerapeakBodyText(scrape.BodyText, query);
-        if (parsed is not null)
-            cache.Set(query, parsed.Average, parsed.Median, parsed.AvgShipping, parsed.SellThroughPercent);
-        return parsed;
+        localSummary = await marketplace.FindComparablesAsync(new MarketplaceLookupRequest
+        {
+            PartNumber = target.PartNumber, Model = target.Model, Brand = target.Brand,
+            Category = target.Category, Keywords = titleText, Condition = target.Condition, MaxComparables = 20,
+        }, ct);
     }
+    catch (OperationCanceledException) { throw; }
     catch (Exception ex)
     {
-        log.Add("Warning", "Terapeak scrape failed", ex.Message);
-        return null;
+        log.Add("Warning", "Market analysis local lookup failed", $"{titleText}: {ex.Message}");
+        localSummary = new MarketplacePricingSummary { Query = titleText };
     }
+    var localComparables = localSummary.ComparableListings;
+
+    // Re-derives Tier/exclusion info for the (already-accepted) comparables MarketplaceRepository
+    // returned — a cheap, pure, in-memory re-score of a small already-fetched set (<=20 rows), not
+    // a new DB or API call — so this orchestration doesn't need IMarketplaceRepository's public
+    // contract to expose ComparableMatch internals.
+    var matches = localComparables.Select(c => matcher.Match(target, c)).Where(m => !m.Excluded).ToList();
+    var strongComparableCount = matches.Count(m => m.MatchConfidence >= 50);
+    var exactIdentifierMatches = matches.Count(m => m.Tier == MatchTier.ExactIdentifier);
+    var modelNumberMatches = matches.Count(m => m.Tier == MatchTier.ExactModel);
+    var mostRecentAgeDays = localComparables.Where(c => c.SoldDate.HasValue)
+        .Select(c => (int)Math.Max(0, (DateTime.UtcNow - c.SoldDate!.Value).TotalDays))
+        .DefaultIfEmpty(-1).Min();
+    int? mostRecentComparableAgeDays = mostRecentAgeDays >= 0 ? mostRecentAgeDays : null;
+
+    // ── Active competition — reuse an already-fetched batch when available, never a new per-item
+    // eBay search just to analyze one candidate ─────────────────────────────────────────────────
+    var competition = new CompetitionAnalysis();
+    if (activeListingsAlreadyFetched is { Count: > 0 })
+    {
+        var closeMatches = activeListingsAlreadyFetched
+            .Where(a => !string.Equals(a.Title, titleText, StringComparison.Ordinal))
+            .Select(a => (Item: a, Score: MarketplaceMatcher.Score(a.Title, titleText).Score))
+            .Where(x => x.Score >= 40)
+            .ToList();
+        competition.CloseActiveComparableCount = closeMatches.Count;
+        if (closeMatches.Count > 0)
+        {
+            var activePrices = closeMatches.Select(x => x.Item.Price).OrderBy(p => p).ToList();
+            competition.MedianActivePrice = MarketplacePricingCalculator.Median(activePrices);
+            competition.LowestRealisticActivePrice = activePrices.Min();
+        }
+    }
+    else if (ebayForCompetitionFallback is not null)
+    {
+        try { competition.CloseActiveComparableCount = await ebayForCompetitionFallback.GetActiveListingCountAsync(titleText); }
+        catch (Exception ex) { log.Add("Warning", "Competition lookup failed", ex.Message); }
+    }
+    competition.CompetitionLevel = competition.CloseActiveComparableCount switch { 0 => "Low", <= 10 => "Moderate", _ => "High" };
+
+    // ── Price estimate — local comps + Terapeak (lazy, rationed by the caller), adaptive blend ──
+    var priceEstimate = await priceEstimator.EstimateAsync(
+        target, localComparables, titleText, listingType, allowRealTerapeakScrape,
+        competition.CloseActiveComparableCount, ct);
+
+    // ── Sell-through ─────────────────────────────────────────────────────────────────────────
+    var sellThrough = sellThroughCalc.Calculate(
+        titleText, localComparables, competition.CloseActiveComparableCount,
+        priceEstimate.ExpectedSalePrice, competition.MedianActivePrice);
+    sellThrough.LiquidityScore = localSummary.LiquidityScore;
+    sellThrough.LiquidityLevel = localSummary.LiquidityLevel;
+
+    var stability = ComputeStability(localComparables, priceEstimate);
+
+    ProfitBreakdown? profit = null;
+    if (supplierUnitCost is decimal cost && priceEstimate.ExpectedSalePrice is decimal expected)
+    {
+        // What buyers typically paid for shipping on the matched comps — the closest available
+        // estimate for "estimated shipping cost" without a new lookup, reusing data already fetched.
+        var avgBuyerShipping = localComparables.Count > 0 ? Math.Round(localComparables.Average(c => c.Shipping), 2) : 0m;
+        profit = profitCalc.Calculate(cost, target.Quantity, expected, priceEstimate.QuickSalePrice ?? expected, avgBuyerShipping, feeProfile);
+    }
+
+    var result = new MarketAnalysisResult
+    {
+        Identity = target, PriceEstimate = priceEstimate, SellThrough = sellThrough, Competition = competition,
+        Profit = profit, Stability = stability,
+        TopSoldComparables = localComparables.OrderByDescending(c => c.MatchScore).Take(5).ToList(),
+        Sources = new SourceBreakdown
+        {
+            LocalComparableCount = localComparables.Count,
+            TerapeakComparableCount = priceEstimate.TerapeakComparableCount,
+            LocalWeightPercent = priceEstimate.LocalWeight * 100,
+            TerapeakWeightPercent = priceEstimate.TerapeakWeight * 100,
+        },
+    };
+
+    result.Confidence = confidenceScorer.Score(result, strongComparableCount, exactIdentifierMatches,
+        modelNumberMatches, mostRecentComparableAgeDays, conditionConsistent: true, quantityConsistent: true, categoryConsistent: true);
+    result.Score = opportunityScorer.Score(result, strongComparableCount, mostRecentComparableAgeDays);
+
+    sw.Stop();
+    log.Add("Info", "Market analysis computed",
+        $"\"{titleText}\"; Local comps: {localComparables.Count} (strong: {strongComparableCount}, " +
+        $"exact-id: {exactIdentifierMatches}, model: {modelNumberMatches}); Source weighting: " +
+        $"local {result.Sources.LocalWeightPercent:0}%/Terapeak {result.Sources.TerapeakWeightPercent:0}%; " +
+        $"Opportunity score: {result.Score.Score}; Confidence: {result.Confidence.Score} ({result.Confidence.Level}); " +
+        $"Duration: {sw.ElapsedMilliseconds}ms");
+
+    return result;
 }
 
-// Single 0-100 number blending everything the Opportunity Finder knows about a listing, so
-// results can be ranked/skimmed at a glance instead of mentally juggling five separate signals.
-// Profit dominates (it's the whole point), verified Terapeak pricing counts more than the
-// broad estimate, and demand/trust/quality act as smaller nudges up or down.
-static int? ComputeOpportunityScore(OpportunityListItem item)
+// Price stability from the dispersion of the strong comparables MarketPriceEstimator already
+// selected (narrow IQR relative to the median = high stability) and a simple recent-vs-older
+// median comparison for trend direction — a small scoring adjustment, not the main determinant.
+static PriceStability ComputeStability(IReadOnlyList<MarketplaceComparableResult> comparables, PriceEstimate estimate)
 {
-    if (item.ProfitPercent is not decimal pct) return null;
+    var stability = new PriceStability();
 
-    var profitScore     = Math.Min(60.0, Math.Max(0.0, (double)pct * 0.6));
-    var confidenceScore = item.IsVerified ? 15.0 : 5.0;
+    if (estimate.Percentile25 is decimal p25 && estimate.Percentile75 is decimal p75 && estimate.MedianPrice is > 0 and decimal median)
+    {
+        var iqrRatio = (double)((p75 - p25) / median);
+        stability.StabilityScore = (int)Math.Round(Math.Clamp(1.0 - iqrRatio, 0, 1) * 100);
+    }
+    else
+    {
+        stability.StabilityScore = comparables.Count > 0 ? 50 : 0; // not enough data to judge — neutral, not confidently stable
+    }
 
-    var demandScore = 0.0;
-    if (item.IsHighDemand) demandScore += 8;
-    if (item.IsEndingSoon) demandScore += 7;
+    var dated = comparables.Where(c => c.SoldDate.HasValue).OrderBy(c => c.SoldDate).ToList();
+    if (dated.Count >= 4)
+    {
+        var half = dated.Count / 2;
+        var older = MarketplacePricingCalculator.Median(dated.Take(half).Select(c => c.SoldPrice).ToList());
+        var recent = MarketplacePricingCalculator.Median(dated.Skip(half).Select(c => c.SoldPrice).ToList());
+        if (older > 0)
+        {
+            var change = (recent - older) / older;
+            stability.Trend = change >= 0.10m ? "Rising" : change <= -0.10m ? "Falling" : "Stable";
+        }
+    }
+    return stability;
+}
 
-    // Log-scaled so a seller with 5,000 feedback isn't scored 100x higher than one with 50.
-    var trustScore = Math.Min(10.0, Math.Log10(item.SellerFeedbackScore + 1) * 3);
+// Flattens a MarketAnalysisResult onto an OpportunityListItem — populates the pre-existing
+// fields (so nothing already reading MarketAverage/ProfitPercent/LiquidityLevel/etc. breaks) and
+// the additive new fields the fuller RESULT DISPLAY needs.
+static void ApplyAnalysisToOpportunityItem(OpportunityListItem candidate, MarketAnalysisResult analysis)
+{
+    var resale = analysis.PriceEstimate.ExpectedSalePrice;
+    if (resale is decimal expected && candidate.TotalCost > 0)
+    {
+        candidate.MarketAverage = analysis.PriceEstimate.MedianPrice ?? candidate.MarketAverage;
+        candidate.EstimatedResaleShipping = 0m;
+        candidate.EstimatedResalePrice = expected;
+        candidate.EstimatedProfit = Math.Round(expected - candidate.TotalCost, 2);
+        candidate.ProfitPercent = Math.Round((expected - candidate.TotalCost) / candidate.TotalCost * 100m, 1);
+        candidate.IsVerified = true;
+        candidate.IsUnderpriced = candidate.ProfitPercent is > 15;
+        candidate.IsHighProfitMargin = candidate.ProfitPercent is > 50;
+    }
 
-    var score = profitScore + confidenceScore + demandScore + trustScore;
-    if (item.HasPoorTitle) score -= 5;
-    if (item.HasPoorPhoto) score -= 5;
+    candidate.LiquidityScore = analysis.SellThrough.LiquidityScore;
+    candidate.LiquidityLevel = analysis.SellThrough.LiquidityLevel;
+    candidate.EstimatedDaysToSell = analysis.SellThrough.EstimatedDaysToSell;
+    candidate.SellThroughPercent = analysis.SellThrough.SellThroughRate ?? (analysis.SellThrough.RateIsUnbounded ? 100m : candidate.SellThroughPercent);
+    candidate.IsHighThroughput = candidate.SellThroughPercent is > 50;
 
-    return (int)Math.Round(Math.Clamp(score, 0, 100));
+    candidate.QuickSalePrice = analysis.PriceEstimate.QuickSalePrice;
+    candidate.RecommendedListingPrice = analysis.PriceEstimate.RecommendedListingPrice;
+    candidate.HighPriceTarget = analysis.PriceEstimate.HighPriceTarget;
+    candidate.LocalComparableCount = analysis.Sources.LocalComparableCount;
+    candidate.TerapeakComparableCount = analysis.Sources.TerapeakComparableCount;
+    candidate.LocalWeightPercent = analysis.Sources.LocalWeightPercent;
+    candidate.TerapeakWeightPercent = analysis.Sources.TerapeakWeightPercent;
+    candidate.ConfidenceScore = analysis.Confidence.Score;
+    candidate.ConfidenceLevel = analysis.Confidence.Level;
+    candidate.PriceStabilityScore = analysis.Stability.StabilityScore;
+    candidate.PriceTrend = analysis.Stability.Trend;
+    candidate.MarketDataDisagreement = analysis.PriceEstimate.MarketDataDisagreement;
+    candidate.DisagreementMessage = analysis.PriceEstimate.DisagreementMessage;
+    candidate.Warnings = analysis.Score.Warnings;
+    candidate.ScoreReasons = analysis.Score.Reasons;
+    candidate.ScoreComponents = analysis.Score.ComponentScores;
+    candidate.TopComparables = analysis.TopSoldComparables;
+    candidate.CompetitionLevel = analysis.Competition.CompetitionLevel;
+    candidate.CloseActiveComparableCount = analysis.Competition.CloseActiveComparableCount;
+    candidate.OpportunityScore = analysis.Score.HardRejected ? 0 : analysis.Score.Score;
+
+    if (analysis.Profit is ProfitBreakdown profit)
+    {
+        candidate.RoiPercent = profit.RoiPercent;
+        candidate.MarginPercent = profit.MarginPercent;
+        candidate.BreakEvenSalePrice = profit.BreakEvenSalePrice;
+    }
+    candidate.EstimatedMonthlySales = analysis.SellThrough.EstimatedMonthlySales;
+}
+
+// Flattens a MarketAnalysisResult onto a DropshipAnalysisItem (Supplier File Analyzer) — same
+// idea as ApplyAnalysisToOpportunityItem, kept as a separate function since the two response
+// shapes have diverged field names for the pre-existing fields.
+static void ApplyAnalysisToDropshipItem(DropshipAnalysisItem item, MarketAnalysisResult analysis)
+{
+    item.LocalDataAvailable = analysis.Sources.LocalComparableCount > 0;
+    if (!item.LocalDataAvailable)
+        item.LocalDataMessage = "No reliable local sold-history matches found.";
+
+    item.EbaySoldAverage = analysis.PriceEstimate.TrimmedMeanPrice;
+    item.EbaySoldMedian = analysis.PriceEstimate.MedianPrice;
+    item.AvgShipping = 0m;
+    item.EstimatedResalePrice = analysis.PriceEstimate.ExpectedSalePrice;
+    item.ComparableCount = analysis.Sources.LocalComparableCount + analysis.Sources.TerapeakComparableCount;
+    item.ConfidenceScore = analysis.Confidence.Score;
+    item.ConfidenceLevel = analysis.Confidence.Level;
+    item.ComparableListings = analysis.TopSoldComparables;
+    item.IsVerified = analysis.PriceEstimate.ExpectedSalePrice is > 0;
+
+    item.EstimatedDaysToSell = analysis.SellThrough.EstimatedDaysToSell;
+    item.LiquidityLevel = analysis.SellThrough.LiquidityLevel;
+    item.SellThroughPercent = analysis.SellThrough.SellThroughRate;
+    item.EstimatedMonthlySales = analysis.SellThrough.EstimatedMonthlySales;
+
+    item.QuickSalePrice = analysis.PriceEstimate.QuickSalePrice;
+    item.RecommendedListingPrice = analysis.PriceEstimate.RecommendedListingPrice;
+    item.HighPriceTarget = analysis.PriceEstimate.HighPriceTarget;
+    item.TerapeakComparableCount = analysis.Sources.TerapeakComparableCount;
+    item.PriceStabilityScore = analysis.Stability.StabilityScore;
+    item.PriceTrend = analysis.Stability.Trend;
+    item.MarketDataDisagreement = analysis.PriceEstimate.MarketDataDisagreement;
+    item.DisagreementMessage = analysis.PriceEstimate.DisagreementMessage;
+    item.Warnings = analysis.Score.Warnings;
+    item.ScoreReasons = analysis.Score.Reasons;
+    item.OpportunityScore = analysis.Score.HardRejected ? 0 : analysis.Score.Score;
+
+    if (analysis.Profit is ProfitBreakdown profit)
+    {
+        item.EstimatedFees = profit.EbayFees + profit.PromotedListingFees;
+        item.EstimatedProfit = profit.NetProfitPerUnit;
+        item.EstimatedProfitPercent = profit.RoiPercent;
+        item.RoiPercent = profit.RoiPercent;
+        item.MarginPercent = profit.MarginPercent;
+        item.BreakEvenSalePrice = profit.BreakEvenSalePrice;
+    }
 }
 
 // Strips generic filler words from a listing title so it can be used as a Terapeak search term
@@ -1350,7 +1723,10 @@ static string ExtractKeywords(string title, int maxWords = 3)
         "and", "or", "for", "with", "of", "in", "on", "to", "from", "by", "the", "a", "an",
         "free", "shipping", "fast", "genuine", "authentic", "official", "brand", "nib", "nwt", "oem"
     ];
-    var words = System.Text.RegularExpressions.Regex.Matches(title, @"[A-Za-z0-9]+")
+    // Keep hyphenated alphanumeric codes as one token (e.g. "A06B-6077-K147" stays whole instead
+    // of fragmenting into "A06B", "6077", "K147") — splitting a single part number across
+    // multiple word-slots was eating into the budget meant for the rest of the title.
+    var words = System.Text.RegularExpressions.Regex.Matches(title, @"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
         .Select(m => m.Value)
         .Where(w => w.Length > 1 && !stopwords.Contains(w.ToLowerInvariant()))
         .ToList();
@@ -1359,11 +1735,17 @@ static string ExtractKeywords(string title, int maxWords = 3)
     // narrowing a Terapeak search to the right item. Truncating at a fixed word count can cut
     // it off, silently turning "EVGA GeForce GTX 660" into "EVGA GeForce" — which prices
     // against every EVGA GeForce card ever sold instead of this specific low-end model.
-    // Extend (capped) far enough to include the first digit-bearing token if one exists.
+    // Some titles carry more than one part number — e.g. "Fanuc A06B-6077-K147 Surge Protector
+    // A74L-0001-0105" names the parent equipment (A06B-...) it's compatible with BEFORE the
+    // part number of the actual item being sold (A74L-...). Stopping at the first digit-bearing
+    // token there would price a cheap accessory against comps for expensive parent hardware.
+    // Extend through the LAST digit-bearing token instead of the first, so a title with several
+    // part numbers still reaches the one that actually identifies the product — capped so a
+    // title that's mostly numbers (serials, sizes) can't blow the query out unboundedly.
     var take = maxWords;
-    var firstDigitIdx = words.FindIndex(w => w.Any(char.IsDigit));
-    if (firstDigitIdx >= 0)
-        take = Math.Min(Math.Max(take, firstDigitIdx + 1), 8);
+    var lastDigitIdx = words.FindLastIndex(w => w.Any(char.IsDigit));
+    if (lastDigitIdx >= 0)
+        take = Math.Min(Math.Max(take, lastDigitIdx + 1), 8);
 
     return string.Join(' ', words.Take(Math.Min(take, words.Count)));
 }
@@ -1807,7 +2189,6 @@ app.MapPost("/api/ebay/upload-picture", async (RemoveBgRequest req, EbayService 
 });
 
 app.MapGet("/api/logs/recent", (ActionLog log) => Results.Ok(log.Recent()));
-
 
 // ── Local Drafts ──────────────────────────────────────────────────
 app.MapGet("/api/local-drafts/ensure-folder", (DraftStore drafts) =>

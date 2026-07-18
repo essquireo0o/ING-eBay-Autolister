@@ -168,30 +168,6 @@ section,div.section,div.section-sm{background-color:inherit;}
 }
 .partners-logos img:hover{filter:grayscale(0) brightness(1);}
 
-/* ═════════════════════════════════════════════════════════════════
-   RIGALERT
-   ════════════════════════════════════════════════════════════════ */
-.rigalert{
-  background:var(--bg-card);
-  border-top:1px solid var(--border);
-  border-bottom:1px solid var(--border);
-}
-.rigalert-inner{
-  display:flex;align-items:center;gap:64px;flex-wrap:wrap;
-}
-.rigalert-text{flex:1;min-width:280px;}
-.rigalert-text h2{margin-bottom:14px;}
-.rigalert-text h2 a{color:var(--text);}
-.rigalert-text .sub{font-size:19px;color:var(--text-muted);margin-bottom:16px;}
-.rigalert-text .desc{font-size:15px;margin-bottom:28px;}
-.rigalert-meta{
-  font-size:11px;color:var(--text-dim);margin-top:12px;
-  display:flex;gap:14px;flex-wrap:wrap;
-}
-.rigalert-meta span::before{content:"· ";}
-.rigalert-meta span:first-child::before{content:"";}
-.rigalert-img{flex:0 0 400px;max-width:400px;}
-@media(max-width:860px){.rigalert-img{flex:1 1 100%;max-width:100%;}}
 .app-frame{
   background:#0d1117;border:1px solid var(--border-hi);border-radius:12px;
   overflow:hidden;box-shadow:var(--shadow),0 0 0 1px rgba(247,147,26,.06);
@@ -689,82 +665,8 @@ body #masthead .site-header-inner{
 
 <div class="divider"></div>
 
-<!-- ════════════════════════════════════════════════════════════════
-     RIGALERT — centered format matching ING Listing Engine
-════════════════════════════════════════════════════════════════ -->
-<section class="section" style="
-  background:linear-gradient(180deg,#060b12 0%,#061209 55%,#060b12 100%);
-  border-top:1px solid rgba(34,197,94,.12);
-  border-bottom:1px solid rgba(34,197,94,.12);
-  position:relative;overflow:hidden">
-
-  <div style="position:absolute;top:-160px;right:-120px;width:560px;height:560px;
-    background:radial-gradient(circle,rgba(34,197,94,.08) 0%,transparent 70%);pointer-events:none"></div>
-  <div style="position:absolute;bottom:-100px;left:-80px;width:400px;height:400px;
-    background:radial-gradient(circle,rgba(34,197,94,.05) 0%,transparent 70%);pointer-events:none"></div>
-
-  <div class="container" style="position:relative;z-index:1">
-
-    <div style="text-align:center;max-width:720px;margin:0 auto 52px">
-      <div class="tag tag-green" style="margin:0 auto 18px;display:table">
-        <span class="dot-live"></span>Free Mining Software — Windows
-      </div>
-      <h2 style="margin-bottom:14px;color:#f1f5f9 !important">
-        RigAlert™ —<br>
-        <span style="color:var(--green)">Monitor Every Miner</span>
-      </h2>
-      <p style="font-size:18px">
-        Keep every miner in your farm online and profitable. RigAlert scans your
-        network, tracks hashrate, temperatures, fan RPM, and chain faults in real time —
-        then fires a Gmail alert the instant something goes wrong. Free for Windows.
-        No subscription. No expiry.
-      </p>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:52px">
-      <div style="text-align:center;padding:30px 22px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
-        <div style="width:44px;height:44px;background:var(--green-dim);border:1px solid rgba(34,197,94,.28);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:20px;font-weight:900;color:var(--green)">1</div>
-        <h3 style="font-size:16px;margin-bottom:8px;color:var(--text) !important">Connect to Network</h3>
-        <p style="font-size:14px">RigAlert scans your local network and finds all Antminer rigs automatically.</p>
-      </div>
-      <div style="text-align:center;padding:30px 22px;background:var(--bg-card);border:1px solid rgba(34,197,94,.22);border-radius:var(--radius);box-shadow:0 0 40px rgba(34,197,94,.04)">
-        <div style="width:44px;height:44px;background:var(--green-dim);border:1px solid rgba(34,197,94,.28);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:20px;font-weight:900;color:var(--green)">2</div>
-        <h3 style="font-size:16px;margin-bottom:8px;color:var(--text) !important">Monitor in Real Time</h3>
-        <p style="font-size:14px">Hashrate, temperatures, fan RPM, and chain faults tracked live — 24/7.</p>
-      </div>
-      <div style="text-align:center;padding:30px 22px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
-        <div style="width:44px;height:44px;background:var(--green-dim);border:1px solid rgba(34,197,94,.28);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:20px;font-weight:900;color:var(--green)">3</div>
-        <h3 style="font-size:16px;margin-bottom:8px;color:var(--text) !important">Instant Gmail Alerts</h3>
-        <p style="font-size:14px">The moment something goes wrong, RigAlert fires a Gmail alert to your inbox.</p>
-      </div>
-    </div>
-
-    <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-bottom:40px">
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Real-Time Hashrate</span>
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Temperature &amp; Fan Alerts</span>
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Auto Password Fill</span>
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Scheduled Gmail Alerts</span>
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Fast Network Scanner</span>
-      <span style="background:var(--green-dim);border:1px solid rgba(34,197,94,.22);border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;color:var(--green)">✓ Chain Fault Detection</span>
-    </div>
-
-    <div style="text-align:center">
-      <a href="https://github.com/essquireo0o/rigalert/releases/download/RigAlertv1.0.0/RigAlert.exe"
-         download style="background:var(--green);color:#022b10;font-size:16px;padding:16px 40px;
-           box-shadow:0 6px 28px rgba(34,197,94,.35);display:inline-flex;gap:10px;align-items:center;
-           border-radius:9px;font-weight:700;text-decoration:none">
-        <svg viewBox="0 0 20 20" width="18" height="18" fill="currentColor">
-          <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
-        </svg>
-        Download RigAlert™ — Free for Windows
-      </a>
-      <p style="font-size:11px;color:var(--text-dim);margin-top:12px">
-        Windows 10/11 &nbsp;·&nbsp; No install required &nbsp;·&nbsp; No subscription &nbsp;·&nbsp; by ING Mining
-      </p>
-    </div>
-
-  </div>
-</section>
+<!-- RigAlert section moved to other-products/rigalert/rigalert-homepage-section.html
+     (RigAlert is a separate product — not part of ING eBay AutoLister). -->
 
 <!-- ════════════════════════════════════════════════════════════════
      ING LISTING ENGINE — full section  ★ NEW ★

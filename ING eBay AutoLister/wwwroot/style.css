@@ -3113,37 +3113,6 @@ textarea {
   padding: 24px 28px 40px;
 }
 
-.nav-pro-badge {
-  display: inline-block;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  color: #082529;
-  background: var(--gold, #c79a36);
-  border-radius: 4px;
-  padding: 1px 5px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.gems-locked {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-  padding: 48px 24px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  background: #f8fbfb;
-  max-width: 460px;
-  margin: 24px auto;
-}
-
-.gems-locked-icon { font-size: 32px; }
-.gems-locked h3 { font-size: 16px; color: var(--ink); }
-.gems-locked p { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-
 .opp-terapeak-banner {
   display: flex;
   align-items: center;
@@ -3288,20 +3257,23 @@ textarea {
 .opp-filter-chip {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   padding: 7px 6px;
   border-radius: 8px;
   font-size: 13px;
+  font-weight: 500;
   color: var(--ink);
   cursor: pointer;
 }
 
-.opp-filter-chip:hover {
-  background: #f2f6f6;
+.opp-filter-chip input {
+  flex-shrink: 0;
+  accent-color: var(--gold);
 }
 
-.opp-filter-chip input {
-  accent-color: var(--gold);
+.opp-filter-chip:hover {
+  background: #f2f6f6;
 }
 
 .opp-filter-chip.opp-filter-disabled {
@@ -3484,6 +3456,195 @@ textarea {
   margin-bottom: 8px;
 }
 
+/* ── Range filters (min ROI / net profit / confidence / sell-through, max days to sell) ──────── */
+.opp-range-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.opp-range-filter input {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* ── Sort toolbar above the results list ──────────────────────────────────────────────────── */
+.opp-results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.opp-results-toolbar select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* ── Confidence badge (next to the Opportunity Score badge) ──────────────────────────────────── */
+.opp-confidence-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  background: #f1f5f5;
+  color: var(--muted);
+}
+
+.opp-confidence-badge.good     { background: rgba(34,197,94,.14); color: #15803d; }
+.opp-confidence-badge.mid-good { background: rgba(199,154,54,.16); color: var(--gold-dark); }
+.opp-confidence-badge.mid      { background: rgba(199,154,54,.10); color: var(--muted); }
+.opp-confidence-badge.bad      { background: rgba(239,68,68,.1); color: #b91c1c; }
+
+/* ── Expandable "how this was scored" panel ───────────────────────────────────────────────────── */
+.opp-details-toggle {
+  background: none;
+  border: none;
+  padding: 4px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold-dark);
+  cursor: pointer;
+}
+
+.opp-details-toggle:hover { text-decoration: underline; }
+
+.opp-result-details {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.opp-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.opp-details-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.opp-details-grid strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.opp-disagreement {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold-dark);
+  background: rgba(199,154,54,.10);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.opp-score-explanation {
+  list-style: none;
+  margin-top: 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.opp-score-explanation .opp-reason { color: #15803d; }
+.opp-score-explanation .opp-warning { color: #b91c1c; }
+
+/* Flags Title/Description as the likely source of an eBay "improper words / policy violation"
+   rejection — see nlHighlightPolicyIssues in app.js. Applies to inputs, textareas, and the
+   rendered description preview alike since any of them may be the visible one at the time. */
+.field-flagged {
+  border: 2px solid var(--danger, #dc2626) !important;
+  background: rgba(220, 38, 38, .06) !important;
+  animation: field-flagged-pulse 1.2s ease-in-out 2;
+}
+@keyframes field-flagged-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .35); }
+  50%      { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+
+.opp-supplier-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbfb;
+  padding: 20px 22px;
+  margin-bottom: 20px;
+}
+
+.opp-supplier-heading {
+  font-size: 16px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.opp-supplier-panel .nl-drop-zone { margin-top: 12px; }
+
+/* Supplier rows have no thumbnail (unlike live-listing opp-result-row), so the info
+   column reclaims that space instead of leaving a blank 56px gutter. */
+.opp-supplier-row {
+  grid-template-columns: minmax(220px, 1.4fr) 150px 190px 110px !important;
+}
+.opp-supplier-row .opp-result-score {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.opp-comp-toggle { margin-top: 8px; }
+
+.opp-liquidity-unknown { color: var(--muted); font-weight: 500; font-size: 11px; }
+
+.opp-comp-panel {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.opp-comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.opp-comp-table th, .opp-comp-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.opp-comp-table th {
+  color: var(--muted);
+  font-weight: 600;
+  background: var(--card-alt, rgba(0,0,0,.02));
+}
+.opp-comp-table td:first-child {
+  white-space: normal;
+  max-width: 320px;
+}
+.opp-comp-table tr:last-child td { border-bottom: none; }
+
 .opportunity-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -3508,3 +3669,55 @@ textarea {
   color: var(--muted);
   line-height: 1.6;
 }
+
+.opportunity-subnote {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.opportunity-insight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opportunity-insight-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.opportunity-insight-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.opportunity-insight-row a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opportunity-insight-row a:hover { color: var(--gold-dark); text-decoration: underline; }
+
+.opportunity-insight-label {
+  color: var(--ink);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.opportunity-insight-value {
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.opportunity-insight-value.good { color: #15803d; }
+.opportunity-insight-value.bad  { color: #b91c1c; }

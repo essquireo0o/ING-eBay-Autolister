@@ -137,24 +137,60 @@ public class OpportunityListItem
     public string BuyingOption { get; set; } = "";
     public int BidCount { get; set; }
     public decimal? MarketAverage { get; set; }
+    public decimal? EstimatedResaleShipping { get; set; }
     public decimal? EstimatedResalePrice { get; set; }
     public decimal? EstimatedProfit { get; set; }
     public decimal? ProfitPercent { get; set; }
+    // How fast this exact item's comps actually sell on eBay (Terapeak sell-through %) — only
+    // populated once the per-item Terapeak recheck verifies this candidate, same as ProfitPercent.
+    public decimal? SellThroughPercent { get; set; }
+    // Sell-through / liquidity (see LiquidityScoringService) — only populated when the per-item
+    // recheck was priced from the local sold-history database, since that's the only source with
+    // per-comparable sold dates to compute velocity/trend from (Terapeak only returns aggregates).
+    public int? LiquidityScore { get; set; }
+    public string? LiquidityLevel { get; set; }
+    public int? EstimatedDaysToSell { get; set; }
     public int? OpportunityScore { get; set; }
     public bool IsVerified { get; set; }
     public bool IsUnderpriced { get; set; }
     public bool IsHighProfitMargin { get; set; }
+    public bool IsHighThroughput { get; set; }
     public bool IsEndingSoon { get; set; }
     public bool IsHighDemand { get; set; }
     public bool IsNewlyListed { get; set; }
     public bool HasPoorTitle { get; set; }
     public bool HasMisspelledTitle { get; set; }
     public bool HasPoorPhoto { get; set; }
+
+    // ── Real matching/pricing/scoring engine output (see Program.cs AnalyzeProductAsync and
+    // Models/MarketAnalysisModels.cs MarketAnalysisResult) — additive, so nothing that already
+    // reads the fields above breaks; these are the fuller breakdown the newer UI surfaces. ──────
+    public decimal? QuickSalePrice { get; set; }
+    public decimal? RecommendedListingPrice { get; set; }
+    public decimal? HighPriceTarget { get; set; }
+    public decimal? RoiPercent { get; set; }
+    public decimal? MarginPercent { get; set; }
+    public decimal? BreakEvenSalePrice { get; set; }
+    public decimal? EstimatedMonthlySales { get; set; }
+    public int LocalComparableCount { get; set; }
+    public int TerapeakComparableCount { get; set; }
+    public decimal LocalWeightPercent { get; set; }
+    public decimal TerapeakWeightPercent { get; set; }
+    public int ConfidenceScore { get; set; }
+    public string? ConfidenceLevel { get; set; }
+    public int PriceStabilityScore { get; set; }
+    public string PriceTrend { get; set; } = "Unknown";
+    public bool MarketDataDisagreement { get; set; }
+    public string? DisagreementMessage { get; set; }
+    public List<string> Warnings { get; set; } = [];
+    public List<string> ScoreReasons { get; set; } = [];
+    public Dictionary<string, double>? ScoreComponents { get; set; }
+    public List<MarketplaceComparableResult> TopComparables { get; set; } = [];
+    public string CompetitionLevel { get; set; } = "Unknown";
+    public int CloseActiveComparableCount { get; set; }
 }
 
-// Return shape of the shared opportunity-search pipeline (Program.cs FindOpportunitiesAsync),
-// used by both the interactive /api/opportunities/search endpoint and the Gem Radar background
-// scanner so the two don't duplicate the search/score/verify logic.
+// Return shape of the opportunity-search pipeline (Program.cs FindOpportunitiesAsync).
 public class OpportunitySearchResult
 {
     public string Query { get; set; } = "";
@@ -166,14 +202,88 @@ public class OpportunitySearchResult
     public List<OpportunityListItem> Items { get; set; } = [];
 }
 
-// A single Gem Radar find, persisted by GemRadarStore. Wraps the same OpportunityListItem the
-// interactive search returns, plus the category keyword that surfaced it and when it was found,
-// so the passive feed doesn't require the user to have typed anything themselves.
-public class GemEntry
+// ── Supplier File Analyzer (dropship profit calculator) ──────────────────────
+
+public class AnalyzeSupplierFileRequest
 {
-    public string Category { get; set; } = "";
-    public DateTime FoundAtUtc { get; set; }
-    public OpportunityListItem Item { get; set; } = new();
+    public string ImageBase64 { get; set; } = "";
+    public string MimeType { get; set; } = "image/jpeg";
+}
+
+// Claude's raw extraction from a supplier price list / product photo — one entry per
+// distinct product or model found in the image.
+public class SupplierProduct
+{
+    public string ProductName { get; set; } = "";
+    public string Brand { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string PartNumber { get; set; } = "";
+    // Concise eBay-search-friendly keyword string (brand + model + key spec), not the
+    // full marketing name — this is what actually gets searched against sold comps.
+    public string SearchQuery { get; set; } = "";
+    public decimal WholesaleCostUsd { get; set; }
+    public string Notes { get; set; } = "";
+}
+
+// One priced dropship candidate — a SupplierProduct plus whatever real sold-comp data
+// (Terapeak or cache) could be found for it.
+public class DropshipAnalysisItem
+{
+    public string ProductName { get; set; } = "";
+    public string SearchQuery { get; set; } = "";
+    public decimal WholesaleCostUsd { get; set; }
+    public string Notes { get; set; } = "";
+    public decimal? EbaySoldAverage { get; set; }
+    public decimal? EbaySoldMedian { get; set; }
+    public decimal? SellThroughPercent { get; set; }
+    public decimal? AvgShipping { get; set; }
+    public decimal? EstimatedFees { get; set; }
+    public decimal? EstimatedProfit { get; set; }
+    public decimal? EstimatedProfitPercent { get; set; }
+    public bool IsVerified { get; set; }
+    public string TerapeakUrl { get; set; } = "";
+
+    // ── Local market research enrichment (generic naming — never expose provider/schema details) ──
+    public bool LocalDataAvailable { get; set; }
+    public decimal? EstimatedResalePrice { get; set; }
+    public int ComparableCount { get; set; }
+    public int ConfidenceScore { get; set; }
+    public List<MarketplaceComparableResult> ComparableListings { get; set; } = [];
+    // Set only when a local lookup ran and found nothing reliable — e.g. "No reliable local
+    // sold-history matches found." UI shows this instead of the local-data fields.
+    public string? LocalDataMessage { get; set; }
+
+    // ── Sell-through / liquidity (see LiquidityScoringService) ──────────────────────────────
+    public int? EstimatedDaysToSell { get; set; }
+    public string? LiquidityLevel { get; set; }
+    // Set when liquidity couldn't be reliably estimated (e.g. fewer than 3 recent comparables) —
+    // e.g. "Not enough recent sales to estimate how fast this sells."
+    public string? LiquidityMessage { get; set; }
+
+    // ── Real matching/pricing/scoring engine output (see Program.cs AnalyzeProductAsync) ──────
+    public decimal? QuickSalePrice { get; set; }
+    public decimal? RecommendedListingPrice { get; set; }
+    public decimal? HighPriceTarget { get; set; }
+    public decimal? RoiPercent { get; set; }
+    public decimal? MarginPercent { get; set; }
+    public decimal? BreakEvenSalePrice { get; set; }
+    public decimal? EstimatedMonthlySales { get; set; }
+    public int TerapeakComparableCount { get; set; }
+    public string? ConfidenceLevel { get; set; }
+    public int PriceStabilityScore { get; set; }
+    public string PriceTrend { get; set; } = "Unknown";
+    public bool MarketDataDisagreement { get; set; }
+    public string? DisagreementMessage { get; set; }
+    public List<string> Warnings { get; set; } = [];
+    public List<string> ScoreReasons { get; set; } = [];
+    public int? OpportunityScore { get; set; }
+}
+
+public class DropshipAnalysisResult
+{
+    public List<DropshipAnalysisItem> Items { get; set; } = [];
+    public int ProductsExtracted { get; set; }
+    public int ProductsPriced { get; set; }
 }
 
 public class GeneratePhotosRequest
