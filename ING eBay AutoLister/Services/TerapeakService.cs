@@ -85,10 +85,20 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             "  } catch (_) {}\n" +
             "  await page.bringToFront().catch(() => {});\n" +
             "  const deadline = Date.now() + 6 * 60 * 1000;\n" +
+            "  let sinceFocus = 0;\n" +
             "  while (Date.now() < deadline) {\n" +
             "    if (!browser.isConnected()) break;\n" + // user closed the window manually
             "    if (page.url().includes('/sh/research')) break;\n" +
             "    await page.waitForTimeout(1000).catch(() => {});\n" +
+            // Re-assert the window to the front every ~5s for the whole wait, not just once at
+            // page load — a CAPTCHA/"verify you're human" interstitial can appear well after the
+            // initial load, and by then the window may have lost focus (alt-tab, this app's own
+            // window stealing it back, etc.), silently burning the whole 6-minute timeout with
+            // the challenge never seen. AllowSetForegroundWindow only grants one "pass" up front,
+            // but bringToFront() is Playwright's own in-browser focus call and keeps working
+            // regardless — that's why it's the thing re-run here, not a second native win32 call.
+            "    sinceFocus++;\n" +
+            "    if (sinceFocus >= 5) { sinceFocus = 0; await page.bringToFront().catch(() => {}); }\n" +
             "  }\n" +
             "  if (browser.isConnected() && page.url().includes('/sh/research')) {\n" +
             "    await page.waitForTimeout(1500);\n" +
