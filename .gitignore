@@ -47,7 +47,17 @@ ingmining_homepage_reference.html
 publish/
 
 # ── ingmining.com website data — kept in a separate folder, never in this repo ──
+# (see C:\Users\nsquires\source\repos\ingmining-com-website\ — moved out of this repo
+# entirely, this app has nothing to do with the ingmining.com website itself)
 ingmining-server/
 ingmining_homepage_*.html
 docs/_elementor_elements.json
+docs/_homepage_full_block.html
+docs/homepage-listing-engine-banner.html
+docs/wordpress-listing-engine-block.html
+docs/inglisting-com-*.html
+docs/listing-engine-demo.html
+docs/assets/
+build_pages.py
+wordpress-plugin/
 ING eBay AutoLister/ebay-callback-relay.php
