@@ -31,6 +31,7 @@
     bindHomeButtons();
     bindForm();
     initEditDrawer();
+    bindMarketResearch();
     restoreListingViewMode();
     addActivity('ING Listing Engine™ ready', 'Official product of ING Mining LLC — all systems operational.');
 
@@ -1873,6 +1874,175 @@
   function canReviseOnEbay(listing) {
     if ((listing.status || '').toUpperCase() === 'SAMPLE') return false;
     return !!(listing.offerId || (listing.listingId && listing.sku));
+  }
+
+  // ── Market Research (inside the Edit Listing drawer) ───────────────────────
+  // Reuses the existing /api/sold-comps endpoint, which already layers Terapeak
+  // (when the seller's session is connected) over Marketplace Insights and falls
+  // back to eBay research deep links. Nothing is duplicated here.
+
+  let lastResearch = null;   // most recent /api/sold-comps payload
+
+  // Strongest available identifier wins — a UPC/EAN/ISBN/MPN match is far more
+  // precise than a title match, which is mostly marketing words.
+  function buildResearchQuery() {
+    const v = id => ($(id)?.value || '').trim();
+    const upc = v('f-upc'), ean = v('f-ean'), isbn = v('f-isbn'), mpn = v('f-mpn');
+    if (upc)  return { q: upc,  basis: 'UPC' };
+    if (ean)  return { q: ean,  basis: 'EAN' };
+    if (isbn) return { q: isbn, basis: 'ISBN' };
+
+    const brand = v('f-brand');
+    if (mpn)          return { q: (brand ? brand + ' ' : '') + mpn, basis: brand ? 'Brand + MPN' : 'MPN' };
+    const title = v('f-title');
+    if (brand && title) return { q: `${brand} ${title}`.slice(0, 120), basis: 'Brand + Title' };
+    if (title)          return { q: title.slice(0, 120), basis: 'Title' };
+    return { q: '', basis: '' };
+  }
+
+  function bindMarketResearch() {
+    if (!$('mr-panel')) return;
+
+    on('btn-mr-sold', 'click', runSoldResearch);
+
+    on('btn-mr-terapeak', 'click', () => {
+      const { q } = buildResearchQuery();
+      if (!q) return setResearchStatus('Add a title, brand, MPN or UPC first.', 'empty');
+      const url = lastResearch?.terapeakUrl ||
+        'https://www.ebay.com/sh/research?marketplace=EBAY-US&tabName=SOLD&dayRange=60&keywords=' + encodeURIComponent(q);
+      window.open(url, '_blank', 'noopener');
+    });
+
+    on('btn-mr-active', 'click', () => {
+      const { q } = buildResearchQuery();
+      if (!q) return setResearchStatus('Add a title, brand, MPN or UPC first.', 'empty');
+      window.open('https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(q) + '&_sop=12',
+                  '_blank', 'noopener');
+    });
+
+    on('btn-mr-finder', 'click', () => {
+      const { q } = buildResearchQuery();
+      if (q) sessionStorage.setItem('opportunityPrefill', q);
+      handleNav('opportunity');
+    });
+
+    on('btn-mr-apply', 'click', () => {
+      const price = recommendedPrice();
+      if (price == null) return;
+      set('f-price', price.toFixed(2));
+      $('f-price')?.dispatchEvent(new Event('input', { bubbles: true }));
+      setResearchStatus(`Price set to ${money(price)} locally — not sent to eBay until you update the listing.`, '');
+      addActivity('Recommended price applied', money(price));
+    });
+
+    on('btn-mr-copy', 'click', async () => {
+      const avg = lastResearch?.average;
+      if (!avg) return;
+      try { await navigator.clipboard.writeText(Number(avg).toFixed(2)); setResearchStatus('Average sold price copied.', ''); }
+      catch { setResearchStatus('Could not access the clipboard.', 'error'); }
+    });
+  }
+
+  function setResearchStatus(msg, kind) {
+    const el = $('mr-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'mr-status' + (kind ? ' ' + kind : '');
+  }
+
+  // Median is the anchor rather than the mean: a couple of parts-only or
+  // mislabelled comps skew an average badly on low sold counts.
+  function recommendedPrice() {
+    if (!lastResearch || !lastResearch.count) return null;
+    const median = Number(lastResearch.median) || 0;
+    const avg    = Number(lastResearch.average) || 0;
+    const base   = median > 0 ? median : avg;
+    return base > 0 ? Math.round(base * 100) / 100 : null;
+  }
+
+  async function runSoldResearch() {
+    const { q, basis } = buildResearchQuery();
+    const results = $('mr-results');
+
+    if (!q) {
+      results?.classList.add('hidden');
+      return setResearchStatus('Add a title, brand, MPN or UPC before researching.', 'empty');
+    }
+
+    setText('mr-query', '');
+    $('mr-query').innerHTML = `Searching by <strong>${esc(basis)}</strong>: ${esc(q)}`;
+    setResearchStatus('Searching sold listings…', 'working');
+    $('btn-mr-sold')?.setAttribute('disabled', 'disabled');
+
+    try {
+      const res = await fetch('/api/sold-comps?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      lastResearch = data;
+      renderResearch(data);
+    } catch (err) {
+      results?.classList.add('hidden');
+      setResearchStatus('Research failed: ' + (err?.message || 'unknown error') +
+                        ' — you can still open Terapeak or eBay search above.', 'error');
+    } finally {
+      $('btn-mr-sold')?.removeAttribute('disabled');
+    }
+  }
+
+  function renderResearch(d) {
+    const results = $('mr-results');
+    const count = Number(d.count) || 0;
+
+    if (!count) {
+      results?.classList.add('hidden');
+      setResearchStatus(
+        d.source === 'none'
+          ? 'No comparable sales available. Terapeak may not be connected (Settings → Terapeak), or eBay has not approved sold-data access for this account. Use the buttons above to research manually.'
+          : 'No comparable sold listings found for this query.',
+        'empty');
+      return;
+    }
+
+    results?.classList.remove('hidden');
+    setResearchStatus('');
+
+    const srcLabel = { terapeak: 'Terapeak', marketplace_insights: 'eBay Insights', none: 'Links only' }[d.source] || d.source || '—';
+    setText('mr-avg',    money(d.average));
+    setText('mr-median', money(d.median));
+    setText('mr-min',    money(d.min));
+    setText('mr-max',    money(d.max));
+    setText('mr-count',  String(count));
+    setText('mr-source', srcLabel);
+
+    const reco = recommendedPrice();
+    setText('mr-reco-price', reco == null ? '—' : money(reco));
+    setText('mr-reco-note',
+      count < 3 ? `Low confidence — only ${count} comparable sale${count === 1 ? '' : 's'}.`
+                : `Based on the median of ${count} sold listings.`);
+
+    // Flag comps far from the median so a skewed sample is visible rather than silent.
+    const median = Number(d.median) || 0;
+    const items = Array.isArray(d.items) ? d.items.slice(0, 12) : [];
+    const box = $('mr-comps');
+    if (!box) return;
+
+    if (!items.length) { box.innerHTML = ''; return; }
+
+    let outliers = 0;
+    box.innerHTML = items.map(it => {
+      const price = Number(it.price ?? it.Price) || 0;
+      const title = it.title ?? it.Title ?? 'Comparable sale';
+      const url   = it.url ?? it.Url ?? it.itemUrl ?? '';
+      const isOutlier = median > 0 && price > 0 && (price > median * 2 || price < median * 0.5);
+      if (isOutlier) outliers++;
+      const label = esc(String(title)).slice(0, 140);
+      return `<div class="mr-comp${isOutlier ? ' outlier' : ''}">
+        <span class="mr-comp-title">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</span>
+        <span class="mr-comp-price">${money(price)}</span>
+      </div>`;
+    }).join('') + (outliers
+      ? `<div class="mr-outlier-note">${outliers} comparable${outliers === 1 ? '' : 's'} priced far from the median — highlighted above.</div>`
+      : '');
   }
 
   // ── Edit Listing drawer ────────────────────────────────────────────────────

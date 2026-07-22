@@ -3871,3 +3871,107 @@ body.drawer-open {
   .edit-drawer,
   .edit-drawer-overlay { transition: none; }
 }
+
+/* ── Market Research panel ───────────────────────────────────────────────── */
+
+.mr-wrap { display: flex; flex-direction: column; gap: 12px; }
+
+.mr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.mr-query {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.mr-query strong { color: var(--ink); }
+
+.mr-status { font-size: 13px; }
+.mr-status.error   { color: var(--danger); }
+.mr-status.working { color: var(--muted); }
+.mr-status.empty   { color: var(--warning); }
+
+.mr-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.mr-stat {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mr-stat span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+
+.mr-stat strong {
+  font-size: 17px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mr-reco {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--teal-900);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.mr-reco-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.mr-reco-main span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #9fc0c2;
+}
+
+.mr-reco-main strong { font-size: 22px; color: var(--gold); }
+.mr-reco-main em { font-size: 11px; color: #9fc0c2; font-style: normal; }
+
+.mr-reco-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.mr-comps { display: flex; flex-direction: column; gap: 6px; }
+
+.mr-comp {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 13px;
+}
+
+.mr-comp-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mr-comp-price { font-weight: 700; white-space: nowrap; }
+
+.mr-comp.outlier { border-color: var(--warning); }
+.mr-comp.outlier .mr-comp-price { color: var(--warning); }
+
+.mr-outlier-note { font-size: 12px; color: var(--warning); }

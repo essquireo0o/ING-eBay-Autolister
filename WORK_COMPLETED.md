@@ -162,17 +162,68 @@ and `canReviseOnEbay()` still blocks revision of SAMPLE placeholder listings.
 
 ---
 
+### Phase 6 — Market Research in the drawer (complete)
+
+Added a **Market Research** collapsible panel to the Edit Listing form, between
+Product Identifiers and Item Specifics.
+
+**Reuses existing services — nothing duplicated.** All sold data comes from the existing
+`GET /api/sold-comps`, which already layers a connected Terapeak session over the
+Marketplace Insights API and falls back to eBay research deep links.
+
+| File | Change |
+|---|---|
+| `wwwroot/index.html` | `#mr-panel` with 4 actions, query line, status line, 6 stat tiles, recommendation bar, comparables list |
+| `wwwroot/style.css` | `.mr-*` styles — responsive stat grid, teal/gold recommendation bar, outlier highlighting |
+| `wwwroot/app.js` | `bindMarketResearch`, `buildResearchQuery`, `runSoldResearch`, `renderResearch`, `recommendedPrice`, `setResearchStatus`; registered in `init()` |
+
+**Query building** uses the strongest identifier available, in order:
+UPC → EAN → ISBN → Brand+MPN → MPN → Brand+Title → Title. The basis used is shown to the
+user, so the result is never a black box.
+
+**Displayed:** average, median, low, high, sold count, data source, recommended price,
+confidence note, and up to 12 comparable sales with links.
+
+**Recommended price anchors on the median, not the mean** — on low sold counts a couple of
+parts-only or mislabelled comps skew an average badly. Comparables more than 2x or less
+than 0.5x the median are flagged as outliers rather than silently averaged in.
+
+**Actions:** Research Sold Prices, Open in Terapeak, Compare Active Listings, Open
+Opportunity Finder, Apply Recommended Price, Copy Average.
+
+`Apply Recommended Price` writes to the local price field only and says so explicitly —
+it never touches the live eBay listing.
+
+**Verification (real browser)**
+
+| Check | Result |
+|---|---|
+| Panel renders in drawer | Pass |
+| Query built from correct basis | Pass — fell back to Title (listing had no UPC/MPN) |
+| API called, response handled | Pass |
+| Empty state when no data | Pass — explains unavailability, does not crash or re-prompt |
+| Console errors | **None** |
+| Build / tests | 0 errors / 86 passed |
+
+---
+
 ## 6. Credential-dependent blockers
 
-None encountered so far. eBay tokens, Anthropic and Stripe keys are read from the app's
-own credential store at runtime and were not needed for this work.
+1. **Terapeak session not connected** in this environment, and the eBay account does not
+   have Marketplace Insights scope approved, so `/api/sold-comps` returns `source: "none"`.
+   This is expected and handled: the panel shows an explanatory empty state and still
+   offers the Terapeak and eBay research deep links, which work in the seller's own
+   logged-in browser. **Not retried repeatedly.** Live sold-data rendering (stat tiles,
+   comparables, outlier flags) could not be visually confirmed against real data for this
+   reason — the no-data path is confirmed working.
+
+eBay tokens, Anthropic and Stripe keys are read from the app's own credential store at
+runtime and were not needed for this work.
 
 ---
 
 ## 7. Remaining work
 
-- Phase 6 — Market Research section inside the drawer (reuse `/api/sold-comps`,
-  `/api/opportunities/search`, existing Terapeak services)
 - Phase 7 — Stock-photo discovery, `IProductImageProvider` abstraction, SSRF-safe import
 - Phase 8 — AI Listing workflow improvements
 - Phase 9 — GUI polish pass

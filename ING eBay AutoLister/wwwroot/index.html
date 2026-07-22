@@ -1088,6 +1088,45 @@
             </div>
           </details>
 
+          <!-- Market Research — reuses /api/sold-comps (Terapeak session first, then
+               Marketplace Insights, then research deep links). Query is built from the
+               strongest identifier available: UPC/EAN/ISBN/MPN, then Brand+Model, then title. -->
+          <details class="form-panel" id="mr-panel">
+            <summary>Market Research</summary>
+            <div class="mr-wrap">
+              <div class="mr-actions">
+                <button type="button" id="btn-mr-sold" class="btn btn-primary small">Research Sold Prices</button>
+                <button type="button" id="btn-mr-terapeak" class="btn btn-secondary small">Open in Terapeak</button>
+                <button type="button" id="btn-mr-active" class="btn btn-secondary small">Compare Active Listings</button>
+                <button type="button" id="btn-mr-finder" class="btn btn-ghost small">Open Opportunity Finder</button>
+              </div>
+              <div id="mr-query" class="mr-query"></div>
+              <div id="mr-status" class="mr-status"></div>
+              <div id="mr-results" class="mr-results hidden">
+                <div class="mr-stats">
+                  <div class="mr-stat"><span>Average Sold</span><strong id="mr-avg">—</strong></div>
+                  <div class="mr-stat"><span>Median Sold</span><strong id="mr-median">—</strong></div>
+                  <div class="mr-stat"><span>Low</span><strong id="mr-min">—</strong></div>
+                  <div class="mr-stat"><span>High</span><strong id="mr-max">—</strong></div>
+                  <div class="mr-stat"><span>Sold Count</span><strong id="mr-count">—</strong></div>
+                  <div class="mr-stat"><span>Data Source</span><strong id="mr-source">—</strong></div>
+                </div>
+                <div class="mr-reco">
+                  <div class="mr-reco-main">
+                    <span>Recommended Price</span>
+                    <strong id="mr-reco-price">—</strong>
+                    <em id="mr-reco-note"></em>
+                  </div>
+                  <div class="mr-reco-actions">
+                    <button type="button" id="btn-mr-apply" class="btn btn-primary small">Apply Recommended Price</button>
+                    <button type="button" id="btn-mr-copy" class="btn btn-ghost small">Copy Average</button>
+                  </div>
+                </div>
+                <div id="mr-comps" class="mr-comps"></div>
+              </div>
+            </div>
+          </details>
+
           <details class="form-panel" open>
             <summary>Item Specifics</summary>
             <div id="specifics-list"></div>
