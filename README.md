@@ -1,80 +1,73 @@
 # ING Listing Engine™
-### by ING Mining LLC
+### AI-Powered eBay Listing Automation & Software by ING Mining LLC
 
-**AI-powered eBay listing automation.** Paste a product URL — Claude AI reads the page, fills your title, description, category, item specifics, photos, and shipping automatically. Bulk-import entire collections in one click. Publish directly to eBay.
+**Automate eBay listing creation with AI.** Paste a product URL, drop in a photo, or import a whole supplier catalog — Claude AI reads it and fills your title, description, category, item specifics, pricing, and shipping automatically. Then use the built-in **Opportunity Finder** to scan real eBay sold-comp data and surface underpriced auctions, high-sell-through categories, and profitable dropship products before you ever list them.
+
+Built for high-volume eBay sellers who are tired of typing the same listing fields by hand.
 
 ---
 
 ## Download & Install
 
-👉 **[Download Latest Release → AutoListerB1.exe](../../releases/latest)**
+👉 **[Download the Installer → ING-AutoLister-Setup.msi](https://github.com/essquireo0o/eBayAutoLister/releases/latest/download/ING-AutoLister-Setup-1.1.0.msi)**
 
-1. Download `AutoListerB1.exe`
-2. Double-click — no install, no .NET required
-3. Your browser opens at `http://localhost:9331`
+1. Download and run `ING-AutoLister-Setup-1.1.0.msi`
+2. Approve the admin prompt — it installs a Windows service that keeps the app running in the background
+3. Your browser opens automatically at `http://localhost:9331`
 4. Enter your API keys in Settings and you're ready
 
-> Windows only. Everything is bundled inside the single exe.
+> Windows only. The service auto-starts on every reboot, so you never have to relaunch it by hand — a tray icon lets you open or quit it any time.
+
+---
+
+## What's New
+
+- **Opportunity Finder** — scan eBay for underpriced auctions, low-competition categories, and high sell-through products using real sold-comp pricing data, with a built-in Supplier File Analyzer that reads a wholesale price list and estimates dropship profit per item.
+- **Real Windows service installer** — no more leaving a console window open; ING AutoLister now installs and runs like a proper Windows application.
+- **Branded app icon** — the taskbar, Desktop, and Start Menu icons now match the ING Mining brand instead of a generic default.
 
 ---
 
 ## Features
 
-### Dashboard — Inventory at a Glance
+### Dashboard — Your Whole eBay Store at a Glance
 
-![Dashboard Overview](docs/screenshots/01-dashboard-overview.png)
+![ING Listing Engine dashboard showing active listings, inventory quantity, and catalog value](docs/screenshots/2026-dashboard.png)
 
-The main dashboard shows your entire eBay seller account at a glance: active listing count, total inventory quantity, catalog value, and items needing review. Existing listings load as photo cards directly from eBay. The Recent Activity feed shows connection status and last actions in real time.
-
----
-
-### Single Product Import — Paste URL, AI Does the Rest
-
-![URL Product Import](docs/screenshots/04-url-product-import.png)
-
-Paste any product URL (supplier page, manufacturer site, existing eBay listing) into the top bar and click **Analyze**. The AI reads the page and auto-fills every field — title, subtitle, category, condition, description, photos, item specifics, pricing, and shipping dimensions.
+See active listing count, total inventory quantity, catalog value, and items needing review the moment you open the app. Existing eBay listings load automatically as photo cards, and the Recent Activity feed shows exactly what the app is doing in real time.
 
 ---
 
-### AI-Filled Listing — Ready in Seconds
+### AI Listing Editor — Paste a URL, Photo, or Product Name
 
-After analysis, every section is pre-populated with keyword-optimized content. The description is written in eBay-safe HTML with a formatted KEY SPECIFICATIONS table. You can review, edit any field, re-analyze, or improve the SEO and description with one click before publishing.
+![AI Listing editor with product research, URL import, and bulk catalog import tools](docs/screenshots/2026-ai-listing.png)
 
----
+Three ways to start a listing, all AI-driven:
+- **AI Product Research** — type a product name and the AI finds photos, specs, and sold prices, then builds a complete listing from scratch.
+- **Import From URL** — paste any supplier, manufacturer, Amazon, Alibaba, or eBay listing link and the AI extracts everything.
+- **Bulk Catalog Import** — paste a category or collection page URL and generate listings for every product on it automatically.
 
-### Item Specifics — Fully Auto-Filled
-
-![Item Specifics Autofill](docs/screenshots/07-item-specifics-autofill.png)
-
-![Advanced Item Specifics](docs/screenshots/08-advanced-item-specifics.png)
-
-eBay item specifics (Brand, Model, Compatible Series, Power Interface, Display, Firmware Version, Algorithm, Cooling, Country of Manufacture, and 20+ more fields) are detected and filled automatically from the product page. Each field can be edited inline before publishing.
+Every field — title, subtitle, category, item specifics, condition, description, pricing, and shipping — is pre-filled in seconds. The **AI Listing Assistant** can also rewrite anything on demand: "shorten the title," "lower price 10%," "optimize for SEO."
 
 ---
 
-### Bulk Collection Import — Entire Catalogs in One Click
+### Opportunity Finder — Find What's Worth Listing Next
 
-![Bulk Collection Import Progress](docs/screenshots/05-bulk-collection-import-progress.png)
+![Opportunity Finder showing sold-comp search, supplier file analyzer, and seasonal demand insights](docs/screenshots/2026-opportunity-finder.png)
 
-![Multi-Tab Bulk Import](docs/screenshots/10-multi-tab-bulk-import.png)
-
-Paste a **collection or category page URL** (e.g. a supplier's product listing page) into the Import bar and click **Import All**. The AI processes every product on the page and opens each one as its own tab — title, description, photos, and specifics filled for all of them at once. Each tab is independent: review, edit, save, or publish individually.
-
----
-
-### Inventory View — Card & Table Modes
-
-![Dashboard Inventory](docs/screenshots/03-dashboard-inventory.png)
-
-Switch between card view and table view to browse your existing eBay listings. Each card shows the product photo, current price, SKU, condition, and spread. Use **Import Listings** to pull in your full inventory from eBay, or **Create New AI Listing** to start fresh.
+Before you source or list a product, know whether it's actually worth it:
+- **Supplier File Analyzer** — drop in a wholesale price list or product photo and the AI checks every item against real eBay sold-comp data to estimate dropship profit.
+- **Keyword & seller search** — cross-references live auctions ending soon against recent sold prices for the same keyword, surfacing high-demand items priced well below where they typically sell.
+- **High sell-through, low competition, and underpriced auction detection** — built directly from your own pricing history as you use the app.
+- **Seasonal demand guidance** — what's trending now and what's coming next month.
 
 ---
 
-### Shipping, Policies & Publish
+### Listings — Manage Your Whole Inventory
 
-![Publish Ready Listing](docs/screenshots/09-publish-ready-listing.png)
+![Existing eBay listings shown as photo cards with price, quantity, and status](docs/screenshots/2026-listings.png)
 
-Before publishing, the app fills in package dimensions (weight, length, width, height), country of origin, and automatically applies your saved seller policies for shipping/fulfillment, payment, and returns. When everything looks right, click **Publish to eBay** to push the live listing directly via the eBay Sell API.
+Browse every listing already on your eBay account in card or table view — photo, price, quantity, SKU, view count, and sync status at a glance. Click through to edit any listing directly, or jump straight to it on eBay.
 
 ---
 
@@ -157,14 +150,19 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 ## How to Use
 
 ### Single Product
-1. Click **New Listing** → paste any product URL → click **Analyze**
+1. Click **AI Listing** → paste any product URL, photo, or product name → click **Analyze** or **Auto-Fill**
 2. AI fills everything in ~10 seconds
 3. Review and edit if needed → click **Publish to eBay**
 
 ### Bulk Import
-1. Click **New Listing** → paste a **collection or category page URL** into the **Import All** bar
+1. Click **AI Listing** → paste a **collection or category page URL** into the Bulk Catalog Import bar
 2. Click **Import All** — each product opens as a tab
 3. Review and publish each tab
+
+### Finding What to List
+1. Click **Opportunity Finder** → search a keyword or drop in a supplier price list
+2. Review sell-through, competition, and pricing signals for each result
+3. Send the winners straight into the AI Listing editor
 
 ### Managing Drafts
 - **Save Draft** — saves locally before publishing
@@ -177,7 +175,7 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 
 **App doesn't open in browser**
 - Try opening `http://localhost:9331` manually
-- Make sure nothing else is running on port 9331
+- Check that the **ING AutoLister** service is running (`services.msc`)
 
 **eBay token expired**
 - Settings → click **Connect eBay Account** again
@@ -186,20 +184,19 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 - Check your Anthropic API key is correct in Settings
 - Verify you have credits on your Anthropic account
 
-**"Address already in use" error**
-- An old copy is running in the background
-- Open Task Manager → find `AutoListerB1.exe` → End Task
-
 **Publish fails with "Developer account not authorized"**
 - You need to open a ticket with eBay to enable production API access (see Step 2c above)
+
+**Uninstalling**
+- Use **Add or Remove Programs** → **ING AutoLister** → Uninstall, or run `Uninstall-INGAutoLister.bat`
 
 ---
 
 ## Built With
 
-- [Claude AI](https://anthropic.com) — product analysis and listing generation
+- [Claude AI](https://anthropic.com) — product analysis, listing generation, and opportunity scoring
 - [eBay Sell API](https://developer.ebay.com) — listing creation and publishing
-- ASP.NET Core 10 — backend server
+- ASP.NET Core 10 — backend server, packaged as a Windows service
 - Vanilla JS — frontend UI
 
 ---
