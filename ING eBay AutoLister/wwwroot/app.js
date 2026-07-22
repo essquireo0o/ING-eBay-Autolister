@@ -2066,10 +2066,28 @@
     $('edit-drawer-overlay')?.addEventListener('click', () => closeEditDrawer());
 
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && isEditDrawerOpen()) {
-        // Let nested overlays (photo editor, modals) consume Escape first.
-        if (document.querySelector('.modal-overlay:not(.hidden), .photo-editor-overlay')) return;
-        closeEditDrawer();
+      if (!isEditDrawerOpen()) return;
+      // Let nested overlays (photo editor, modals) consume keys first.
+      if (document.querySelector('.modal-overlay:not(.hidden), .photo-editor-overlay')) return;
+
+      if (e.key === 'Escape') { closeEditDrawer(); return; }
+
+      // Ctrl/Cmd+S saves the draft — deliberately bound to the draft-preview
+      // action, never to the live eBay revision, which must stay an explicit,
+      // confirmed click.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        const btn = $('btn-post');
+        if (btn && !btn.classList.contains('hidden') && !btn.disabled) btn.click();
+        else setResearchStatus?.('', '');
+        return;
+      }
+
+      // Ctrl/Cmd+R runs sold-price research without reaching for the mouse.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault();
+        $('mr-panel')?.setAttribute('open', 'open');
+        $('btn-mr-sold')?.click();
       }
     });
 
