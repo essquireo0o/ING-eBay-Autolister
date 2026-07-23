@@ -219,16 +219,16 @@ New-Item -ItemType Directory -Force -Path `$smDir | Out-Null
 
 Write-Host "  Shortcuts created (Desktop, Start Menu, Startup)." -ForegroundColor Green
 
-# Add inglistingengine.com → 127.0.0.1 to the Windows hosts file
+# Add inglist.com → 127.0.0.1 to the Windows hosts file
 `$hostsFile = "`$env:SystemRoot\System32\drivers\etc\hosts"
-`$hostsEntry = "127.0.0.1  inglistingengine.com"
+`$hostsEntry = "127.0.0.1  inglist.com"
 `$alreadySet = (Get-Content `$hostsFile -ErrorAction SilentlyContinue) | Select-String "inglistingengine\.com" -Quiet
 if (-not `$alreadySet) {
     try {
         # Try direct write (works when running as admin)
         Add-Content `$hostsFile "`n`$hostsEntry" -Encoding ASCII -ErrorAction Stop
-        Write-Host "  Local DNS added: inglistingengine.com -> 127.0.0.1" -ForegroundColor Green
-        Write-Host "  You can access the app at: http://inglistingengine.com:9331" -ForegroundColor Green
+        Write-Host "  Local DNS added: inglist.com -> 127.0.0.1" -ForegroundColor Green
+        Write-Host "  You can access the app at: http://inglist.com:9331" -ForegroundColor Green
     } catch {
         # Not admin - re-launch the elevated helper
         Write-Host "  Adding local DNS (UAC prompt may appear)..." -ForegroundColor Yellow

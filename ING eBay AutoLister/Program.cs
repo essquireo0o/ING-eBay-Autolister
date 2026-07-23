@@ -29,7 +29,7 @@ var port    = Environment.GetEnvironmentVariable("AUTOLISTER_DEV_PORT") ?? "9331
 var baseUrl = $"http://localhost:{port}";
 var isDevPort = port != "9331";
 
-// ── Elevated helper: add inglistingengine.com → 127.0.0.1 to hosts ──────────
+// ── Elevated helper: add inglist.com → 127.0.0.1 to hosts ──────────
 // The installer re-launches with this flag as admin. After adding the entry the
 // process exits immediately — it is not the long-running server instance.
 if (args.Contains("--add-local-dns"))
@@ -37,10 +37,26 @@ if (args.Contains("--add-local-dns"))
     try
     {
         const string hostsFile = @"C:\Windows\System32\drivers\etc\hosts";
-        const string entry     = "127.0.0.1  inglistingengine.com";
+        const string entry     = "127.0.0.1  inglist.com";
         var lines = File.ReadAllLines(hostsFile);
-        if (!lines.Any(l => l.Contains("inglistingengine.com", StringComparison.OrdinalIgnoreCase)))
+        if (!lines.Any(l => l.Contains("inglist.com", StringComparison.OrdinalIgnoreCase)))
             File.AppendAllText(hostsFile, $"\n{entry}\n");
+    }
+    catch { }
+    return;
+}
+
+// ── Post-install helper: just open the web UI, then exit ──────────────────────
+// The MSI runs the exe with this flag when the install finishes. It does NOT bind
+// a port or start the tray/server (the installed Windows service already owns
+// port 9331), so there's no conflict — it only pops the browser to the running
+// app so the user lands on the page immediately after installing.
+if (args.Contains("--open-browser"))
+{
+    try
+    {
+        System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(baseUrl) { UseShellExecute = true });
     }
     catch { }
     return;
@@ -2499,7 +2515,7 @@ _ = Task.Run(async () =>
     OpenBrowser();
 });
 
-// One-time check: add the local DNS entry for inglistingengine.com if missing
+// One-time check: add the local DNS entry for inglist.com if missing
 _ = Task.Run(async () =>
 {
     await Task.Delay(3000);
@@ -2578,12 +2594,12 @@ void OpenBrowser() =>
     System.Diagnostics.Process.Start(
         new System.Diagnostics.ProcessStartInfo(baseUrl) { UseShellExecute = true });
 
-// Adds inglistingengine.com → 127.0.0.1 to the hosts file by re-launching the
+// Adds inglist.com → 127.0.0.1 to the hosts file by re-launching the
 // exe with --add-local-dns under a UAC elevation prompt (one-time, non-fatal).
 static void EnsureLocalDns(string exeDir)
 {
     const string hostsFile = @"C:\Windows\System32\drivers\etc\hosts";
-    const string hostname  = "inglistingengine.com";
+    const string hostname  = "inglist.com";
     var flagFile = Path.Combine(exeDir, ".dns-configured");
     if (File.Exists(flagFile)) return;
     try
