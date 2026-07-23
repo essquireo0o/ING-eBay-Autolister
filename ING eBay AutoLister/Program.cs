@@ -901,7 +901,7 @@ app.MapPost("/api/quick-fill", async (QuickFillRequest req, ClaudeService claude
     }
 });
 
-app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService terapeak, ActionLog log) =>
+app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService terapeak, IMarketplaceRepository marketplace, ActionLog log) =>
 {
     if (string.IsNullOrWhiteSpace(q))
         return Results.BadRequest(new { error = "Query is required." });
@@ -914,6 +914,25 @@ app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService
                        "&keywords=" + Uri.EscapeDataString(q);
     var fallbackUrl = "https://www.ebay.com/sch/i.html?_nkw=" + Uri.EscapeDataString(q) + "&LH_Sold=1&LH_Complete=1&_sop=13";
 
+    // Blend the local Marketplace.db sold history into the reported average at 40% weight
+    // (Terapeak/Insights carries the other 60%). The local comps are NOT surfaced in the
+    // response — the bar's items/count/median/min/max stay exactly as the primary source
+    // returned them; only the Average value reflects the blend. If there is no local data,
+    // or no primary average, the average falls back to whichever single source has data.
+    async Task<decimal> BlendLocalAverageAsync(decimal primaryAverage)
+    {
+        try
+        {
+            var local  = await marketplace.SearchByKeywordAsync(q, limit: 24);
+            var prices = local.Where(c => c.SoldPrice > 0m).Select(c => c.SoldPrice).ToList();
+            if (prices.Count == 0) return primaryAverage;
+            var localAverage = prices.Average();
+            if (primaryAverage <= 0m) return Math.Round(localAverage, 2);
+            return Math.Round(primaryAverage * 0.6m + localAverage * 0.4m, 2);
+        }
+        catch { return primaryAverage; }
+    }
+
     // 1) Real Terapeak data, if the seller has connected their session (Settings > Terapeak)
     if (terapeak.IsConnected)
     {
@@ -922,7 +941,10 @@ app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService
         {
             var parsed = TerapeakMarketService.ParseTerapeakBodyText(scrape.BodyText, q);
             if (parsed is not null)
-                return Results.Ok(new { parsed.Query, parsed.Items, parsed.Count, parsed.Average, parsed.Median, parsed.Min, parsed.Max, terapeakUrl, fallbackUrl, source = "terapeak" });
+            {
+                var average = await BlendLocalAverageAsync(parsed.Average);
+                return Results.Ok(new { parsed.Query, parsed.Items, parsed.Count, Average = average, parsed.Median, parsed.Min, parsed.Max, terapeakUrl, fallbackUrl, source = "terapeak" });
+            }
         }
         else if (scrape.Status == "session_expired")
         {
@@ -935,7 +957,10 @@ app.MapGet("/api/sold-comps", async (string q, EbayService ebay, TerapeakService
     {
         var result = await ebay.SearchSoldCompsAsync(q);
         if (result.Count > 0)
-            return Results.Ok(new { result.Query, result.Items, result.Count, result.Average, result.Median, result.Min, result.Max, terapeakUrl, fallbackUrl, source = "marketplace_insights" });
+        {
+            var average = await BlendLocalAverageAsync(result.Average);
+            return Results.Ok(new { result.Query, result.Items, result.Count, Average = average, result.Median, result.Min, result.Max, terapeakUrl, fallbackUrl, source = "marketplace_insights" });
+        }
     }
     catch (Exception ex)
     {
