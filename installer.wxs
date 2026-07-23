@@ -15,7 +15,7 @@
 
   <Package Name="ING AutoLister"
            Manufacturer="ING Mining LLC"
-           Version="2.1.0.0"
+           Version="2.2.0.0"
            UpgradeCode="{7A8F9B2C-3D4E-5F60-A1B2-C3D4E5F6A7B8}"
            Scope="perMachine">
 
@@ -37,30 +37,16 @@
       <Directory Id="ING_MINING_DIR" Name="ING Mining">
         <Directory Id="INSTALLFOLDER" Name="ING AutoLister">
 
-          <!-- Main executable + Windows service registration -->
+          <!-- Main executable. NO Windows service: the app runs as the logged-in USER
+               (via the HKLM Run key below + the finish-screen launch), because its
+               interactive features (the Terapeak login browser via Playwright) cannot
+               work from a LocalSystem service — the service account can't find the user's
+               Playwright and can't show a browser on the user's desktop. -->
           <Component Id="MainExeComp" Guid="{A2B3C4D5-E6F7-0001-1234-567890ABCDEF}">
             <File Id="MainExeFile"
                   Source="$(var.SourceDir)AutoListerB1.exe"
                   KeyPath="yes"
                   Checksum="yes" />
-
-            <!-- Windows service: auto-starts at boot as LocalSystem -->
-            <ServiceInstall Id="INGAutoListerSvc"
-                            Name="INGAutoLister"
-                            DisplayName="ING AutoLister"
-                            Description="ING Listing Engine - web server on localhost:9332 by ING Mining LLC"
-                            Start="auto"
-                            Type="ownProcess"
-                            ErrorControl="normal"
-                            Account="LocalSystem" />
-
-            <!-- Start on install, stop on upgrade/uninstall, delete on uninstall -->
-            <ServiceControl Id="INGAutoListerSvcCtrl"
-                            Name="INGAutoLister"
-                            Start="install"
-                            Stop="both"
-                            Remove="uninstall"
-                            Wait="no" />
           </Component>
 
           <!--
@@ -167,7 +153,7 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <CustomAction Id="LaunchApplication"
                   Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]AutoListerB1.exe&quot; --open-browser"
+                  ExeCommand="&quot;[INSTALLFOLDER]AutoListerB1.exe&quot;"
                   Return="asyncNoWait"
                   Impersonate="yes" />
     <UI>
