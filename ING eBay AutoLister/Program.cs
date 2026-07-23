@@ -32,19 +32,9 @@ var isDevPort = port != "9331";
 // ── Elevated helper: add inglist.com → 127.0.0.1 to hosts ──────────
 // The installer re-launches with this flag as admin. After adding the entry the
 // process exits immediately — it is not the long-running server instance.
-if (args.Contains("--add-local-dns"))
-{
-    try
-    {
-        const string hostsFile = @"C:\Windows\System32\drivers\etc\hosts";
-        const string entry     = "127.0.0.1  inglist.com";
-        var lines = File.ReadAllLines(hostsFile);
-        if (!lines.Any(l => l.Contains("inglist.com", StringComparison.OrdinalIgnoreCase)))
-            File.AppendAllText(hostsFile, $"\n{entry}\n");
-    }
-    catch { }
-    return;
-}
+// (removed) --add-local-dns hosts-file writer — see note near app startup: the
+// hosts write is gone entirely to avoid antivirus/EDR flagging. App runs on
+// http://localhost:9331.
 
 // ── Post-install helper: just open the web UI, then exit ──────────────────────
 // The MSI runs the exe with this flag when the install finishes. It does NOT bind
@@ -2515,12 +2505,11 @@ _ = Task.Run(async () =>
     OpenBrowser();
 });
 
-// One-time check: add the local DNS entry for inglist.com if missing
-_ = Task.Run(async () =>
-{
-    await Task.Delay(3000);
-    EnsureLocalDns(exeDir);
-});
+// NOTE: the app is reached at http://localhost:9331 — no hosts-file/local-DNS
+// entry is written. Modifying C:\Windows\System32\drivers\etc\hosts is a classic
+// malware technique (hosts hijacking) that AV/EDR flags, and it forced a UAC
+// prompt for a purely cosmetic hostname alias. Dropping it removes both the
+// antivirus risk and the elevation, with no loss of function.
 
 System.Windows.Forms.Application.EnableVisualStyles();
 System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
@@ -2594,37 +2583,5 @@ void OpenBrowser() =>
     System.Diagnostics.Process.Start(
         new System.Diagnostics.ProcessStartInfo(baseUrl) { UseShellExecute = true });
 
-// Adds inglist.com → 127.0.0.1 to the hosts file by re-launching the
-// exe with --add-local-dns under a UAC elevation prompt (one-time, non-fatal).
-static void EnsureLocalDns(string exeDir)
-{
-    const string hostsFile = @"C:\Windows\System32\drivers\etc\hosts";
-    const string hostname  = "inglist.com";
-    var flagFile = Path.Combine(exeDir, ".dns-configured");
-    if (File.Exists(flagFile)) return;
-    try
-    {
-        var text = File.ReadAllText(hostsFile);
-        if (text.Contains(hostname, StringComparison.OrdinalIgnoreCase))
-        {
-            File.WriteAllText(flagFile, DateTime.Now.ToString("u"));
-            return;
-        }
-    }
-    catch { return; }
-    // Entry missing — elevate to add it
-    try
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName         = Environment.ProcessPath!,
-            Arguments        = "--add-local-dns",
-            Verb             = "runas",
-            UseShellExecute  = true,
-        };
-        using var proc = System.Diagnostics.Process.Start(psi);
-        proc?.WaitForExit(8000);
-        File.WriteAllText(flagFile, DateTime.Now.ToString("u"));
-    }
-    catch { /* user declined UAC — no problem, app still works on localhost */ }
-}
+// EnsureLocalDns removed: no hosts-file write means nothing for antivirus/EDR to
+// flag as hosts hijacking. The app is reached at http://localhost:9331.
