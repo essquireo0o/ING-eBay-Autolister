@@ -24,22 +24,22 @@ bool isWindowsService = WindowsServiceHelpers.IsWindowsService();
 // ── Dev port override ─────────────────────────────────────────────────────────
 // Set AUTOLISTER_DEV_PORT to run a second, independent instance side-by-side
 // with the installed Windows service (e.g. while iterating on source without
-// touching the service's port 9331).
-var port    = Environment.GetEnvironmentVariable("AUTOLISTER_DEV_PORT") ?? "9331";
+// touching the service's port 9332).
+var port    = Environment.GetEnvironmentVariable("AUTOLISTER_DEV_PORT") ?? "9332";
 var baseUrl = $"http://localhost:{port}";
-var isDevPort = port != "9331";
+var isDevPort = port != "9332";
 
 // ── Elevated helper: add inglist.com → 127.0.0.1 to hosts ──────────
 // The installer re-launches with this flag as admin. After adding the entry the
 // process exits immediately — it is not the long-running server instance.
 // (removed) --add-local-dns hosts-file writer — see note near app startup: the
 // hosts write is gone entirely to avoid antivirus/EDR flagging. App runs on
-// http://localhost:9331.
+// http://localhost:9332.
 
 // ── Post-install helper: just open the web UI, then exit ──────────────────────
 // The MSI runs the exe with this flag when the install finishes. It does NOT bind
 // a port or start the tray/server (the installed Windows service already owns
-// port 9331), so there's no conflict — it only pops the browser to the running
+// port 9332), so there's no conflict — it only pops the browser to the running
 // app so the user lands on the page immediately after installing.
 if (args.Contains("--open-browser"))
 {
@@ -56,7 +56,7 @@ if (args.Contains("--open-browser"))
 // Service mode: SCM guarantees a single instance — skip the mutex entirely.
 // Interactive mode:
 //   1. Acquire mutex so only one tray instance runs at a time.
-//   2. If the Windows service is already serving on 9331, show a tray icon
+//   2. If the Windows service is already serving on 9332, show a tray icon
 //      without starting a second web server (opens browser immediately).
 //   3. Otherwise start the server ourselves, then show the tray icon.
 System.Threading.Mutex? _mutex = null;
@@ -2521,7 +2521,7 @@ _ = Task.Run(async () =>
     OpenBrowser();
 });
 
-// NOTE: the app is reached at http://localhost:9331 — no hosts-file/local-DNS
+// NOTE: the app is reached at http://localhost:9332 — no hosts-file/local-DNS
 // entry is written. Modifying C:\Windows\System32\drivers\etc\hosts is a classic
 // malware technique (hosts hijacking) that AV/EDR flags, and it forced a UAC
 // prompt for a purely cosmetic hostname alias. Dropping it removes both the
@@ -2600,4 +2600,4 @@ void OpenBrowser() =>
         new System.Diagnostics.ProcessStartInfo(baseUrl) { UseShellExecute = true });
 
 // EnsureLocalDns removed: no hosts-file write means nothing for antivirus/EDR to
-// flag as hosts hijacking. The app is reached at http://localhost:9331.
+// flag as hosts hijacking. The app is reached at http://localhost:9332.

@@ -221,15 +221,15 @@ Write-Host "  Shortcuts created (Desktop, Start Menu, Startup)." -ForegroundColo
 
 # No hosts-file / local-DNS write: modifying the Windows hosts file is a classic
 # malware pattern (hosts hijacking) that antivirus/EDR flags, and it forced a UAC
-# prompt for a cosmetic hostname. The app is reached at http://localhost:9331.
+# prompt for a cosmetic hostname. The app is reached at http://localhost:9332.
 
 Write-Host ""
 Write-Host "  Launching ING AutoLister..." -ForegroundColor Cyan
 Start-Process `$exePath
 Start-Sleep -Seconds 3
-Start-Process "http://localhost:9331"
+Start-Process "http://localhost:9332"
 Write-Host ""
-Write-Host "  Done! The app is running at http://localhost:9331" -ForegroundColor Green
+Write-Host "  Done! The app is running at http://localhost:9332" -ForegroundColor Green
 Write-Host "  It lives in the system tray - right-click the tray icon to open or quit." -ForegroundColor Green
 Write-Host ""
 "@
