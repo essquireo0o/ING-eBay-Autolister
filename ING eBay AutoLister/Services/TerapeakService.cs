@@ -79,11 +79,25 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             "  const ctx = await browser.newContext({ viewport: null });\n" +
             "  await ctx.addInitScript(() => { Object.defineProperty(navigator,'webdriver',{get:()=>undefined}); });\n" +
             "  const page = await ctx.newPage();\n" +
-            "  await page.bringToFront().catch(() => {});\n" +
+            // raise(): bring the actual Chrome OS window to the foreground, not just the tab.
+            // page.bringToFront() only focuses the tab within Chrome; it does NOT lift the window
+            // above the user's other windows, so a CAPTCHA can sit behind this app unseen. The
+            // CDP minimize->normal cycle forces Windows to re-raise and refocus the real window.
+            "  let cdp = null;\n" +
+            "  async function raise() {\n" +
+            "    try {\n" +
+            "      await page.bringToFront().catch(() => {});\n" +
+            "      if (!cdp) cdp = await ctx.newCDPSession(page);\n" +
+            "      const { windowId } = await cdp.send('Browser.getWindowForTarget');\n" +
+            "      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });\n" +
+            "      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });\n" +
+            "    } catch (_) {}\n" +
+            "  }\n" +
+            "  await raise();\n" +
             "  try {\n" +
             "    await page.goto('https://www.ebay.com/sh/research?marketplace=EBAY-US&tabName=SOLD', { waitUntil: 'domcontentloaded', timeout: 30000 });\n" +
             "  } catch (_) {}\n" +
-            "  await page.bringToFront().catch(() => {});\n" +
+            "  await raise();\n" +
             "  const deadline = Date.now() + 6 * 60 * 1000;\n" +
             "  let sinceFocus = 0;\n" +
             "  while (Date.now() < deadline) {\n" +
@@ -98,7 +112,7 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             // but bringToFront() is Playwright's own in-browser focus call and keeps working
             // regardless — that's why it's the thing re-run here, not a second native win32 call.
             "    sinceFocus++;\n" +
-            "    if (sinceFocus >= 5) { sinceFocus = 0; await page.bringToFront().catch(() => {}); }\n" +
+            "    if (sinceFocus >= 5) { sinceFocus = 0; await raise(); }\n" +
             "  }\n" +
             "  if (browser.isConnected() && page.url().includes('/sh/research')) {\n" +
             "    await page.waitForTimeout(1500);\n" +

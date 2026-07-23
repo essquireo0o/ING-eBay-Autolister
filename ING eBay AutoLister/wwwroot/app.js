@@ -3219,8 +3219,8 @@
       $('nl-sold-comps-stat-count').textContent   = data.count;
       stats.classList.remove('hidden');
 
-      // Show every sold item returned, newest first — scrollable, not capped to a handful
-      const sorted = [...data.items].sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate));
+      // Show the 7 most recent sold items, newest first, centered in the bar
+      const sorted = [...data.items].sort((a, b) => new Date(b.soldDate) - new Date(a.soldDate)).slice(0, 7);
       list.innerHTML = sorted.map(it => `
         <a class="nl-sold-comp-row" href="${it.url}" target="_blank" rel="noopener">
           ${it.imageUrl

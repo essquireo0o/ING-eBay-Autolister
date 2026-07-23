@@ -1984,7 +1984,7 @@ textarea {
   position: relative;
   border-top: 1px solid var(--line);
   background: linear-gradient(135deg, #0c3438 0%, #115057 55%, #0d5c63 100%);
-  padding: 20px 48px 20px 22px;
+  padding: 30px 48px 34px 48px;
   animation: nlSoldCompsIn .2s ease-out;
 }
 @keyframes nlSoldCompsIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
@@ -2050,12 +2050,15 @@ textarea {
 .nl-sold-comps-stat-count .nl-sold-comps-stat-val { color: #fff; }
 
 .nl-sold-comp-table {
-  max-height: 220px;
+  max-height: 420px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 7px;
   padding-right: 4px;
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
 }
 .nl-sold-comp-table:empty { display: none; }
 .nl-sold-comp-row {
