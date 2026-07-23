@@ -1982,9 +1982,11 @@ textarea {
 
 .nl-sold-comps-strip {
   position: relative;
-  border-top: 1px solid var(--line);
-  background: linear-gradient(135deg, #0c3438 0%, #115057 55%, #0d5c63 100%);
-  padding: 30px 48px 34px 48px;
+  border-top: 1px solid rgba(199,154,54,.35);
+  background:
+    radial-gradient(120% 140% at 85% -20%, rgba(199,154,54,.18) 0%, transparent 55%),
+    linear-gradient(135deg, #0a2f33 0%, #114f56 55%, #0d5c63 100%);
+  padding: 22px 40px 26px 40px;
   animation: nlSoldCompsIn .2s ease-out;
 }
 @keyframes nlSoldCompsIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
@@ -2019,35 +2021,65 @@ textarea {
 .nl-sold-comps-title-text { font-weight: 800; color: #fff; font-size: 16px; letter-spacing: .01em; }
 .nl-sold-comps-summary-text { font-weight: 700; color: #fff; letter-spacing: .01em; margin-left: auto; }
 
-/* Connect-to-Terapeak prompt — shown until a session exists, then hidden on data. */
+/* Connect-to-Terapeak prompt — a self-contained card shown until a session exists. */
 .nl-sold-comps-connect {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 6px 0 2px;
-  text-align: center;
+  gap: 10px;
 }
 .nl-sold-comps-connect.hidden { display: none; }
-.nl-sold-comps-connect-text { color: rgba(255,255,255,.82); font-size: 14px; max-width: 460px; }
+
+.nl-sold-comps-connect-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: 720px;
+  width: 100%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  padding: 16px 20px;
+  backdrop-filter: blur(2px);
+}
+.nl-sold-comps-connect-icon {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: rgba(199,154,54,.16);
+  border: 1px solid rgba(199,154,54,.4);
+  border-radius: 12px;
+}
+.nl-sold-comps-connect-copy { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nl-sold-comps-connect-copy strong { color: #fff; font-size: 15.5px; font-weight: 800; letter-spacing: .01em; }
+.nl-sold-comps-connect-text { color: rgba(255,255,255,.72); font-size: 13.5px; line-height: 1.45; }
 .nl-sold-comps-connect-btn {
-  background: var(--gold);
-  color: var(--teal-950);
+  flex-shrink: 0;
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-dark) 100%);
+  color: #1a1204;
   border: none;
-  border-radius: 9px;
-  padding: 10px 20px;
+  border-radius: 10px;
+  padding: 12px 22px;
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
   white-space: nowrap;
-  transition: background .15s;
+  box-shadow: 0 6px 16px rgba(199,154,54,.3);
+  transition: transform .12s, box-shadow .12s, filter .12s;
 }
-.nl-sold-comps-connect-btn:hover { background: var(--gold-soft); }
-.nl-sold-comps-connect-btn:disabled { opacity: .6; cursor: not-allowed; }
-.nl-sold-comps-connect-msg { color: var(--gold-soft); font-size: 13px; width: 100%; }
+.nl-sold-comps-connect-btn:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 9px 22px rgba(199,154,54,.4); }
+.nl-sold-comps-connect-btn:active { transform: translateY(0); }
+.nl-sold-comps-connect-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; box-shadow: none; }
+.nl-sold-comps-connect-msg { color: var(--gold-soft); font-size: 13px; text-align: center; }
+
+@media (max-width: 640px) {
+  .nl-sold-comps-connect-card { flex-direction: column; text-align: center; gap: 12px; }
+  .nl-sold-comps-connect-copy { align-items: center; }
+}
 .nl-sold-comps-link {
   color: var(--gold-soft);
   font-weight: 700;

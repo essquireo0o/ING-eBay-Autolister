@@ -111,8 +111,11 @@ public class TerapeakService(IWebHostEnvironment env, ActionLog log)
             // the challenge never seen. AllowSetForegroundWindow only grants one "pass" up front,
             // but bringToFront() is Playwright's own in-browser focus call and keeps working
             // regardless — that's why it's the thing re-run here, not a second native win32 call.
+            // Gentle tab-focus only during the wait — NOT the minimize/normal cycle, which
+            // would visibly refresh the window every few seconds and interrupt the user mid-
+            // CAPTCHA. The one-time raise() on load already brought the window to the front.
             "    sinceFocus++;\n" +
-            "    if (sinceFocus >= 5) { sinceFocus = 0; await raise(); }\n" +
+            "    if (sinceFocus >= 8) { sinceFocus = 0; await page.bringToFront().catch(() => {}); }\n" +
             "  }\n" +
             "  if (browser.isConnected() && page.url().includes('/sh/research')) {\n" +
             "    await page.waitForTimeout(1500);\n" +
