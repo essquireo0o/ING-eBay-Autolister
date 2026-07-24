@@ -54,7 +54,7 @@ $credsRaw = Get-Content $credsSource -Raw | ConvertFrom-Json
 function Coalesce($a, $b) { if ($null -ne $a -and $a -ne '') { $a } else { $b } }
 
 $distCreds = [ordered]@{
-    AnthropicApiKey             = ""   # users enter their own at console.anthropic.com
+    AnthropicApiKey             = ""   # NOT embedded — each customer enters their own Claude key at console.anthropic.com
     OpenAiApiKey                = ""   # optional — only needed for DALL-E image gen
     ImageGenMode                = Coalesce $credsRaw.ImageGenMode       "disabled"
     LocalSdEndpoint             = Coalesce $credsRaw.LocalSdEndpoint    "http://127.0.0.1:7860"

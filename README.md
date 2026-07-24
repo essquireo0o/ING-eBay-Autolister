@@ -71,11 +71,11 @@ Browse every listing already on your eBay account in card or table view — phot
 
 ---
 
-### Freeware — No Subscription, No Expiry
+### Free — Public Beta
 
-ING Listing Engine™ is **freeware**. All features are unlocked with no time limit and no subscription required.
+ING Listing Engine™ is **free during the public beta**. All features are unlocked — no subscription, no charge, no credit card.
 
-Activate with key **`ING-BETA-2025`** in the License page to enable everything.
+The beta license key **`ING-BETA-2025`** is built in and activates automatically, so everything is enabled the moment you install.
 
 ---
 
