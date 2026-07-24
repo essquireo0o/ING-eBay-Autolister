@@ -9,21 +9,21 @@ Built for high-volume eBay sellers who are tired of typing the same listing fiel
 
 ## Download & Install
 
-👉 **[Download the Installer → ING-AutoLister-Setup.msi](https://github.com/essquireo0o/eBayAutoLister/releases/latest/download/ING-AutoLister-Setup-1.1.0.msi)**
+👉 **[Download the Installer → ING-AutoLister-Setup.msi](https://github.com/essquireo0o/eBayAutoLister/releases/latest/download/ING-AutoLister-Setup.msi)**
 
-1. Download and run `ING-AutoLister-Setup-1.1.0.msi`
-2. Approve the admin prompt — it installs a Windows service that keeps the app running in the background
-3. Your browser opens automatically at `http://localhost:9331`
+1. Download and run `ING-AutoLister-Setup.msi`
+2. Approve the admin prompt — it installs the app and adds it to startup for the logged-in user
+3. Your browser opens automatically at `http://localhost:9332`
 4. Enter your API keys in Settings and you're ready
 
-> Windows only. The service auto-starts on every reboot, so you never have to relaunch it by hand — a tray icon lets you open or quit it any time.
+> Windows only. The app runs as you (the logged-in user), not as a background Windows service, and auto-starts on login — a tray icon lets you open or quit it any time.
 
 ---
 
 ## What's New
 
 - **Opportunity Finder** — scan eBay for underpriced auctions, low-competition categories, and high sell-through products using real sold-comp pricing data, with a built-in Supplier File Analyzer that reads a wholesale price list and estimates dropship profit per item.
-- **Real Windows service installer** — no more leaving a console window open; ING AutoLister now installs and runs like a proper Windows application.
+- **Runs as the logged-in user** — no more leaving a console window open, and no background Windows service; ING AutoLister installs like a proper desktop application and auto-starts on login. Running as you (not LocalSystem) is what lets the Terapeak browser login work.
 - **Branded app icon** — the taskbar, Desktop, and Start Menu icons now match the ING Mining brand instead of a generic default.
 
 ---
@@ -174,8 +174,8 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 ## Troubleshooting
 
 **App doesn't open in browser**
-- Try opening `http://localhost:9331` manually
-- Check that the **ING AutoLister** service is running (`services.msc`)
+- Try opening `http://localhost:9332` manually
+- Check that **AutoListerB1.exe** is running (Task Manager) — look for the ING tray icon; it auto-starts on login
 
 **eBay token expired**
 - Settings → click **Connect eBay Account** again
@@ -196,7 +196,7 @@ In **Settings → Listing Defaults**, pre-fill your postal code, default handlin
 
 - [Claude AI](https://anthropic.com) — product analysis, listing generation, and opportunity scoring
 - [eBay Sell API](https://developer.ebay.com) — listing creation and publishing
-- ASP.NET Core 10 — backend server, packaged as a Windows service
+- ASP.NET Core 10 — backend server, running as a tray app under the logged-in user
 - Vanilla JS — frontend UI
 
 ---
