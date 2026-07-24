@@ -66,7 +66,7 @@ Test  : dotnet test  "ING eBay AutoLister.slnx" -c Debug --no-build
 Run   : AUTOLISTER_DEV_PORT=9332 ./bin/Debug/net10.0-windows/AutoListerB1.exe
 ```
 
-`AUTOLISTER_DEV_PORT` runs a second instance beside the installed service (port 9331).
+`AUTOLISTER_DEV_PORT` runs a second instance on another port beside the installed app (which uses port 9332).
 
 ---
 
@@ -93,7 +93,7 @@ written to `G:\My Drive\ING_Backups\` instead, which is writable. Verified, then
 
 Two app instances were found running:
 
-- **PID 8580** — `INGAutoLister` Windows **service**, port 9331. **Left running, untouched.**
+- **PID 8580** — the installed ING AutoLister app instance, port 9332. **Left running, untouched.**
 - **PID 54804** — dev build from `bin\Debug`, port 9332, holding a file lock that blocked
   the build. Stopped (dev instance only).
 
@@ -283,7 +283,7 @@ dotnet build "ING eBay AutoLister.slnx" -c Debug
 AUTOLISTER_DEV_PORT=9332 ./ING\ eBay\ AutoLister/bin/Debug/net10.0-windows/AutoListerB1.exe
 ```
 
-Port 9331 belongs to the installed Windows service — always use a dev port instead.
+Port 9332 belongs to the installed app — set AUTOLISTER_DEV_PORT to another port for a dev instance.
 `wwwroot` files are embedded resources, so **UI edits require a rebuild** to take effect.
 - Phase 8 — AI Listing workflow improvements
 - Phase 9 — GUI polish pass
