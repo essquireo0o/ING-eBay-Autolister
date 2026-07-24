@@ -118,14 +118,25 @@ public sealed class MarketPriceEstimator(TerapeakMarketService terapeakMarket)
             return;
         }
 
+        var localMedian = estimate.MedianPrice ?? 0m;
+        var terapeakMedian = terapeak.Data.Median > 0 ? terapeak.Data.Median : terapeak.Data.Average;
+
+        // Robust dispersion for each source, kept on a comparable scale:
+        //   local    -> inter-quartile range (P75 - P25)
+        //   Terapeak -> half its min..max range (we only get min/max, not quartiles; half-range
+        //               keeps it roughly IQR-comparable and less inflated by a single outlier).
+        var localSpread = Math.Max(0m, (estimate.Percentile75 ?? 0m) - (estimate.Percentile25 ?? 0m));
+        var terapeakSpread = terapeak.Data.Max > terapeak.Data.Min
+            ? (terapeak.Data.Max - terapeak.Data.Min) * 0.5m
+            : 0m;
+
         var (localWeight, terapeakWeight) = ResolveWeights(
-            estimate.MedianPrice is > 0, localStrongCount, terapeakStrongCount, terapeak.FreshnessWeight);
+            estimate.MedianPrice is > 0, localStrongCount, terapeakStrongCount, terapeak.FreshnessWeight,
+            localMedian, localSpread, terapeakMedian, terapeakSpread);
 
         estimate.LocalWeight = localWeight;
         estimate.TerapeakWeight = terapeakWeight;
 
-        var localMedian = estimate.MedianPrice ?? 0;
-        var terapeakMedian = terapeak.Data.Median > 0 ? terapeak.Data.Median : terapeak.Data.Average;
         var blendedMedian = localMedian * localWeight + terapeakMedian * terapeakWeight;
         var blendedExpected = (estimate.ExpectedSalePrice ?? localMedian) * localWeight + terapeakMedian * terapeakWeight;
 
@@ -143,32 +154,42 @@ public sealed class MarketPriceEstimator(TerapeakMarketService terapeakMarket)
     // Adaptive local-vs-Terapeak blend weights per the spec's table. Pure/testable: takes only
     // the counts/flags the decision depends on, not the estimate/result objects themselves.
     public static (decimal LocalWeight, decimal TerapeakWeight) ResolveWeights(
-        bool hasLocalMedian, int localStrongCount, int terapeakStrongCount, double terapeakFreshnessWeight)
+        bool hasLocalMedian, int localStrongCount, int terapeakStrongCount, double terapeakFreshnessWeight,
+        decimal localMedian = 0m, decimal localSpread = 0m,
+        decimal terapeakMedian = 0m, decimal terapeakSpread = 0m)
     {
-        decimal localWeight, terapeakWeight;
-        if (!hasLocalMedian)
-        {
-            (localWeight, terapeakWeight) = (0m, 1m);
-        }
-        else if (terapeakStrongCount >= 10)
-        {
-            (localWeight, terapeakWeight) = (0.25m, 0.75m);
-        }
-        else if (terapeakStrongCount < 3 && localStrongCount >= 3)
-        {
-            (localWeight, terapeakWeight) = (0.70m, 0.30m);
-        }
-        else
-        {
-            (localWeight, terapeakWeight) = (0.40m, 0.60m);
-        }
+        // No usable estimate on one side -> the other carries everything.
+        if (!hasLocalMedian || localStrongCount <= 0) return (0m, 1m);
+        if (terapeakStrongCount <= 0)                 return (1m, 0m);
 
-        // Apply the Terapeak-side freshness decay to its share of the blend, redistributing the
-        // discount back to local rather than just discarding it — stale Terapeak data shouldn't
-        // silently vanish, it should just count for less.
-        terapeakWeight *= (decimal)terapeakFreshnessWeight;
-        localWeight = 1m - terapeakWeight;
-        return (localWeight, terapeakWeight);
+        // Precision-weighted blend — a smooth stand-in for inverse-variance weighting. Each
+        // source's pull ~ its sample size x its reliability, where reliability falls as that
+        // source's own spread widens relative to its median (a noisy source counts for less).
+        // Spread is optional: when unknown it is neutral, so the blend degrades to a smooth
+        // sample-size ratio — no arbitrary bucket cliffs like the old 3/10-comp step table.
+        var localPrecision    = localStrongCount    * Reliability(localMedian,    localSpread);
+        var terapeakPrecision = terapeakStrongCount * Reliability(terapeakMedian, terapeakSpread);
+
+        // Freshness decays Terapeak's effective weight — a stale scrape is worth less, and the
+        // lost share flows back to local rather than vanishing.
+        terapeakPrecision *= Math.Clamp((decimal)terapeakFreshnessWeight, 0m, 1m);
+
+        var total = localPrecision + terapeakPrecision;
+        if (total <= 0m) return (1m, 0m);
+
+        var terapeakWeight = terapeakPrecision / total;
+        // Never let one real source completely erase the other — keep both visible in the estimate.
+        terapeakWeight = Math.Clamp(terapeakWeight, 0.15m, 0.85m);
+        return (1m - terapeakWeight, terapeakWeight);
+    }
+
+    // Reliability multiplier in (0,1]: 1 when spread is unknown/zero, shrinking smoothly as the
+    // relative spread (spread / median) grows. Bounded and monotonic, so a single wide-ranging
+    // source is down-weighted without ever dominating or disappearing.
+    private static decimal Reliability(decimal median, decimal spread)
+    {
+        if (median <= 0m || spread <= 0m) return 1m;
+        return 1m / (1m + spread / median);
     }
 
     // >20% median disagreement between the two sources — flagged so the caller shows both
