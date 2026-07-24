@@ -1036,11 +1036,10 @@
       await populateSetupFields(status);
       updateSetupChecklist(!!status.hasAnthropicKey, isConnected, !!status.hasOpenAiKey);
       if (!status.isComplete) {
-        addActivity('Credentials needed', 'Open Settings to finish configuration.');
+        addActivity('Finish setup', 'Complete the 2 steps on the home page to activate.');
       }
-      if (!status.hasAnthropicKey) {
-        openSetup(null);
-      }
+      // No startup pop-up: the home-page "2 steps to activate" checklist handles
+      // entering the Claude key and connecting eBay directly on the dashboard.
     } catch {
       addActivity('Setup status unavailable', 'Could not read local credential status.');
     }
